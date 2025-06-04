@@ -115,7 +115,7 @@ class Backtester:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Market Making Strategy Backtester")
-    parser.add_argument('--data_file', type=str, required=True, help='Path to the CSV trade data file.')
+    parser.add_argument('--data-file', type=str, required=True, help='Path to the CSV trade data file.')
 
     args = parser.parse_args()
 
