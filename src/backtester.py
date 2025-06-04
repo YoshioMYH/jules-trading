@@ -1,6 +1,10 @@
+import argparse
+
 import pandas as pd
+
+from src.data_loader import load_trade_data  # For example usage
 from src.strategy import MarketMakingStrategy
-from src.data_loader import load_trade_data # For example usage
+
 
 class Backtester:
     """
@@ -108,11 +112,16 @@ class Backtester:
         return self.trades_log
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Market Making Strategy Backtester")
+    parser.add_argument('--data_file', type=str, required=True, help='Path to the CSV trade data file.')
+
+    args = parser.parse_args()
+
     # Example Usage
     print("Running Backtester Example...")
 
     # 1. Load sample data
-    data_file = 'data/sample_trades.csv'
+    data_file = args.data_file
     trade_data_df = load_trade_data(data_file)
 
     if trade_data_df.empty:

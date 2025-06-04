@@ -1,12 +1,14 @@
 import argparse
-import pandas as pd
-import matplotlib.pyplot as plt
-import numpy as np # For np.arange
 
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+from src.backtester import Backtester
 from src.data_loader import load_trade_data
 from src.strategy import MarketMakingStrategy
-from src.utils import permute_trade_data # Import for permutation
-from src.backtester import Backtester
+from src.utils import permute_trade_data
+
 
 def main():
     parser = argparse.ArgumentParser(description="Market Making Strategy Backtester with Optimization")
