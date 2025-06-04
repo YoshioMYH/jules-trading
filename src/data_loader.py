@@ -1,8 +1,5 @@
-import os
-
 import pandas as pd
 
-DATA_DIR = '..\\data'
 DEFAULT_NAMES = ['trade_id', 'price', 'size', 'quote_size', 'time', 'buyer_maker', 'best_match']
 
 def load_trade_data(file_path: str) -> pd.DataFrame:
@@ -17,8 +14,8 @@ def load_trade_data(file_path: str) -> pd.DataFrame:
         Returns an empty DataFrame if an error occurs.
     """
     try:
-        full_path = os.path.join(DATA_DIR, file_path)
-        df = pd.read_csv(full_path, names=DEFAULT_NAMES)
+        # full_path = os.path.join(DATA_DIR, file_path) # Removed problematic DATA_DIR
+        df = pd.read_csv(file_path, names=DEFAULT_NAMES) # Use file_path directly
 
         # Convert numeric columns
         for col in ['price', 'size', 'quote_size']:
@@ -41,10 +38,10 @@ def load_trade_data(file_path: str) -> pd.DataFrame:
 
         return df
     except FileNotFoundError:
-        print(f"Error: File not found at {file_path}")
+        print(f"Error: File not found at {file_path}") # file_path is now the direct path
         return pd.DataFrame()
     except pd.errors.ParserError:
-        print(f"Error: Could not parse CSV file at {file_path}")
+        print(f"Error: Could not parse CSV file at {file_path}") # file_path is now the direct path
         return pd.DataFrame()
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
@@ -52,7 +49,11 @@ def load_trade_data(file_path: str) -> pd.DataFrame:
 
 if __name__ == '__main__':
     # Example usage:
-    sample_file = 'data/sample_trades.csv' # Path when running from project root
+    # Note: If running this data_loader.py directly, it's now relative to src/
+    # For it to find data/sample_trades.csv, you'd need to adjust the path
+    # or run from the project root.
+    # e.g., sample_file = '../data/sample_trades.csv' if running from src/
+    sample_file = 'data/sample_trades.csv' # Path when running from project root (e.g. via test_runner.py)
     trade_df = load_trade_data(sample_file)
     if not trade_df.empty:
         print("Trade data loaded successfully:")

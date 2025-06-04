@@ -1,6 +1,7 @@
 import argparse
 
 import pandas as pd
+from tqdm import tqdm
 
 from src.data_loader import load_trade_data  # For example usage
 from src.strategy import MarketMakingStrategy
@@ -41,7 +42,8 @@ class Backtester:
             print("Data is empty, cannot run backtest.")
             return
 
-        for index, tick in self.data.iterrows():
+        total_ticks = len(self.data)
+        for index, tick in tqdm(self.data.iterrows(), total=total_ticks, desc="Running backtest"):
             current_time = tick['time']
             market_price = tick['price']
             # trade_size_from_data = tick['size'] # Size of the trade in the data
