@@ -1,4 +1,9 @@
+import os
+
 import pandas as pd
+
+DATA_DIR = '..\\data'
+DEFAULT_NAMES = ['trade_id', 'price', 'size', 'quote_size', 'time', 'buyer_maker', 'best_match']
 
 def load_trade_data(file_path: str) -> pd.DataFrame:
     """
@@ -12,7 +17,8 @@ def load_trade_data(file_path: str) -> pd.DataFrame:
         Returns an empty DataFrame if an error occurs.
     """
     try:
-        df = pd.read_csv(file_path)
+        full_path = os.path.join(DATA_DIR, file_path)
+        df = pd.read_csv(full_path, names=DEFAULT_NAMES)
 
         # Convert numeric columns
         for col in ['price', 'size', 'quote_size']:
