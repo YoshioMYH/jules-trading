@@ -12,13 +12,13 @@ from src.utils import permute_trade_data
 
 def main():
     parser = argparse.ArgumentParser(description="Market Making Strategy Backtester with Optimization")
-    parser.add_argument('--data_file', type=str, required=True, help='Path to the CSV trade data file.')
-    parser.add_argument('--order_size', type=float, required=True, help='Order size for the strategy.')
-    parser.add_argument('--spread_min_bps', type=float, required=True, help='Minimum spread in basis points for optimization.')
-    parser.add_argument('--spread_max_bps', type=float, required=True, help='Maximum spread in basis points for optimization.')
-    parser.add_argument('--spread_step_bps', type=float, required=True, help='Step size for spread in basis points during optimization.')
-    parser.add_argument('--output_plot_prefix', type=str, default='optimization_plot', help='Prefix for output plot filenames.')
-    parser.add_argument('--permute_data', action='store_true', help='If set, run backtest on data with shuffled prices.')
+    parser.add_argument('--data-file', type=str, required=True, help='Path to the CSV trade data file.')
+    parser.add_argument('--order-size', type=float, required=True, help='Order size for the strategy.')
+    parser.add_argument('--spread-min-bps', type=float, required=True, help='Minimum spread in basis points for optimization.')
+    parser.add_argument('--spread-max-bps', type=float, required=True, help='Maximum spread in basis points for optimization.')
+    parser.add_argument('--spread-step-bps', type=float, required=True, help='Step size for spread in basis points during optimization.')
+    parser.add_argument('--output-plot-prefix', type=str, default='optimization_plot', help='Prefix for output plot filenames.')
+    parser.add_argument('--permute-data', action='store_true', help='If set, run backtest on data with shuffled prices.')
 
     args = parser.parse_args()
 
