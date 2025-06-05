@@ -42,13 +42,14 @@ class Backtester:
             print("Data is empty, cannot run backtest.")
             return
 
-        total_ticks = len(self.data)
-        for index, tick in tqdm(self.data.iterrows(), total=total_ticks, desc="Running backtest"):
-            current_time = tick['time']
-            market_price = tick['price']
-            # trade_size_from_data = tick['size'] # Size of the trade in the data
-            buyer_maker_from_data = tick['buyer_maker'] # Who was the maker in the data's trade
+        # Extract columns as NumPy arrays for performance
+        times = self.data['time'].to_numpy()
+        prices = self.data['price'].to_numpy()
+        buyer_makers = self.data['buyer_maker'].to_numpy()
 
+        total_ticks = len(self.data)
+        # Iterate using zip over NumPy arrays
+        for current_time, market_price, buyer_maker_from_data in tqdm(zip(times, prices, buyer_makers), total=total_ticks, desc="Running backtest"):
             # Update strategy with current market price
             self.strategy.update_market_price(market_price)
 
