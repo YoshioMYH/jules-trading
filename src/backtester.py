@@ -205,6 +205,17 @@ if __name__ == '__main__':
             print("\nNo trades were executed by the strategy.")
 
         # 6. Save full results to JSON
+        # Preprocess datetime objects to ISO format strings for JSON serialization
+        if 'trades' in results and isinstance(results['trades'], list):
+            for trade_entry in results['trades']:
+                if 'time' in trade_entry and hasattr(trade_entry['time'], 'isoformat'):
+                    trade_entry['time'] = trade_entry['time'].isoformat()
+
+        if 'tick_data' in results and isinstance(results['tick_data'], list):
+            for tick_entry in results['tick_data']:
+                if 'time' in tick_entry and hasattr(tick_entry['time'], 'isoformat'):
+                    tick_entry['time'] = tick_entry['time'].isoformat()
+
         results_file_name = "backtest_results.json"
         try:
             with open(results_file_name, 'w') as f:

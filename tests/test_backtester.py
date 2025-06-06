@@ -1,5 +1,6 @@
 import pytest
 import pandas as pd
+import json # Added import
 from src.strategy import MarketMakingStrategy
 from src.backtester import Backtester
 
@@ -270,3 +271,30 @@ class TestBacktester:
             assert isinstance(first_tick['ask_quote'], (float, type(None)))
             # 'time' is pd.Timestamp from fixture, check if it's still that or string
             assert isinstance(first_tick['time'], pd.Timestamp) # Based on sample_market_data fixture
+
+    def test_results_are_json_serializable(self, sample_market_data, basic_strategy):
+        """Test that the results dictionary, after datetime conversion, is JSON serializable."""
+        backtester = Backtester(data=sample_market_data, strategy=basic_strategy)
+        backtester.run_backtest(spread_bps=10, order_size=0.1) # Run a basic backtest
+
+        results = backtester.get_results()
+
+        # Replicate the datetime conversion logic from backtester.py's main block
+        if 'trades' in results and isinstance(results['trades'], list):
+            for trade_log in results['trades']:
+                if 'time' in trade_log and hasattr(trade_log['time'], 'isoformat'):
+                    trade_log['time'] = trade_log['time'].isoformat()
+
+        if 'tick_data' in results and isinstance(results['tick_data'], list):
+            for tick_log in results['tick_data']:
+                if 'time' in tick_log and hasattr(tick_log['time'], 'isoformat'):
+                    tick_log['time'] = tick_log['time'].isoformat()
+
+        # Attempt to serialize to JSON
+        try:
+            json.dumps(results)
+            serializable = True
+        except TypeError:
+            serializable = False
+
+        assert serializable, "Backtest results are not JSON serializable after datetime conversion."
