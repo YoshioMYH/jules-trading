@@ -1,8 +1,9 @@
 import pytest
 import pandas as pd
-import json # Added import
+import json
 from src.strategy import MarketMakingStrategy
 from src.backtester import Backtester
+from src.utils import DateTimeEncoder # Added import
 
 @pytest.fixture
 def sample_market_data():
@@ -279,22 +280,14 @@ class TestBacktester:
 
         results = backtester.get_results()
 
-        # Replicate the datetime conversion logic from backtester.py's main block
-        if 'trades' in results and isinstance(results['trades'], list):
-            for trade_log in results['trades']:
-                if 'time' in trade_log and hasattr(trade_log['time'], 'isoformat'):
-                    trade_log['time'] = trade_log['time'].isoformat()
+        # Manual datetime conversion logic removed, DateTimeEncoder should handle it.
 
-        if 'tick_data' in results and isinstance(results['tick_data'], list):
-            for tick_log in results['tick_data']:
-                if 'time' in tick_log and hasattr(tick_log['time'], 'isoformat'):
-                    tick_log['time'] = tick_log['time'].isoformat()
-
-        # Attempt to serialize to JSON
+        # Attempt to serialize to JSON using DateTimeEncoder
         try:
-            json.dumps(results)
+            json.dumps(results, cls=DateTimeEncoder)
             serializable = True
-        except TypeError:
+        except TypeError as e: # Catch the specific error for better debugging
             serializable = False
+            print(f"TypeError during JSON serialization in test: {e}") # Optional: print error
 
-        assert serializable, "Backtest results are not JSON serializable after datetime conversion."
+        assert serializable, "Backtest results are not JSON serializable using DateTimeEncoder."

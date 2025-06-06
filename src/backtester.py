@@ -6,6 +6,7 @@ from tqdm import tqdm
 
 from src.data_loader import load_trade_data  # For example usage
 from src.strategy import MarketMakingStrategy
+from src.utils import DateTimeEncoder # Added import
 
 
 class Backtester:
@@ -205,21 +206,12 @@ if __name__ == '__main__':
             print("\nNo trades were executed by the strategy.")
 
         # 6. Save full results to JSON
-        # Preprocess datetime objects to ISO format strings for JSON serialization
-        if 'trades' in results and isinstance(results['trades'], list):
-            for trade_entry in results['trades']:
-                if 'time' in trade_entry and hasattr(trade_entry['time'], 'isoformat'):
-                    trade_entry['time'] = trade_entry['time'].isoformat()
-
-        if 'tick_data' in results and isinstance(results['tick_data'], list):
-            for tick_entry in results['tick_data']:
-                if 'time' in tick_entry and hasattr(tick_entry['time'], 'isoformat'):
-                    tick_entry['time'] = tick_entry['time'].isoformat()
+        # Manual datetime conversion loops removed. DateTimeEncoder will handle it.
 
         results_file_name = "backtest_results.json"
         try:
             with open(results_file_name, 'w') as f:
-                json.dump(results, f, indent=4)
+                json.dump(results, f, indent=4, cls=DateTimeEncoder) # Used DateTimeEncoder
             print(f"\nFull backtest results saved to {results_file_name}")
         except Exception as e:
             print(f"\nError saving results to JSON: {e}")
