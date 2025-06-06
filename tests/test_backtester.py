@@ -40,9 +40,13 @@ class TestBacktester:
         # Very wide spread, no trades should occur
         backtester.run_backtest(spread_bps=1000, order_size=0.1) # 10% spread
 
-        assert len(backtester.get_results()) == 0, "Trades log should be empty"
-        assert basic_strategy.pnl == 0.0, "Strategy PnL should be 0.0"
-        assert basic_strategy.inventory == 0.0, "Strategy inventory should be 0.0"
+        results_dict = backtester.get_results()
+        assert len(results_dict['trades']) == 0, "Trades log should be empty"
+        assert results_dict['summary_stats']['total_trades'] == 0
+        assert results_dict['summary_stats']['final_pnl'] == 0.0
+        assert results_dict['summary_stats']['final_inventory'] == 0.0
+        assert basic_strategy.pnl == 0.0, "Strategy PnL should be 0.0" # Redundant with summary_stats but good for direct check
+        assert basic_strategy.inventory == 0.0, "Strategy inventory should be 0.0" # Redundant
 
     def test_run_backtest_with_sell_trade(self, basic_strategy):
         """Test a backtest run that should result in the strategy selling."""
@@ -77,17 +81,22 @@ class TestBacktester:
         strategy_order_size = 0.1 # The size the strategy intends to trade
         backtester.run_backtest(spread_bps=0, order_size=strategy_order_size)
 
-        results = backtester.get_results()
-        assert len(results) == 1, "One trade should be logged"
-        trade = results[0]
+        results_dict = backtester.get_results()
+        trades_log = results_dict['trades']
+        summary_stats = results_dict['summary_stats']
+
+        assert len(trades_log) == 1, "One trade should be logged"
+        trade = trades_log[0]
         assert trade['type'] == 'sell', "Trade type should be 'sell'"
         assert trade['price'] == 101.0, "Trade price should be the strategy's ask price"
         assert trade['size'] == strategy_order_size, "Trade size should be strategy's order size"
 
         # PnL = price * size = 101.0 * 0.1 = 10.1
         # Inventory = -size = -0.1
-        assert basic_strategy.pnl == pytest.approx(10.1)
-        assert basic_strategy.inventory == pytest.approx(-0.1)
+        assert summary_stats['final_pnl'] == pytest.approx(10.1)
+        assert summary_stats['final_inventory'] == pytest.approx(-0.1)
+        assert basic_strategy.pnl == pytest.approx(10.1) # Direct check
+        assert basic_strategy.inventory == pytest.approx(-0.1) # Direct check
 
     def test_run_backtest_with_buy_trade(self, basic_strategy):
         """Test a backtest run that should result in the strategy buying."""
@@ -108,17 +117,22 @@ class TestBacktester:
         strategy_order_size = 0.1
         backtester.run_backtest(spread_bps=0, order_size=strategy_order_size)
 
-        results = backtester.get_results()
-        assert len(results) == 1, "One trade should be logged"
-        trade = results[0]
+        results_dict = backtester.get_results()
+        trades_log = results_dict['trades']
+        summary_stats = results_dict['summary_stats']
+
+        assert len(trades_log) == 1, "One trade should be logged"
+        trade = trades_log[0]
         assert trade['type'] == 'buy', "Trade type should be 'buy'"
         assert trade['price'] == 99.0, "Trade price should be the strategy's bid price"
         assert trade['size'] == strategy_order_size, "Trade size should be strategy's order size"
 
         # PnL = - (price * size) = - (99.0 * 0.1) = -9.9
         # Inventory = size = 0.1
-        assert basic_strategy.pnl == pytest.approx(-9.9)
-        assert basic_strategy.inventory == pytest.approx(0.1)
+        assert summary_stats['final_pnl'] == pytest.approx(-9.9)
+        assert summary_stats['final_inventory'] == pytest.approx(0.1)
+        assert basic_strategy.pnl == pytest.approx(-9.9) # Direct check
+        assert basic_strategy.inventory == pytest.approx(0.1) # Direct check
 
     def test_run_backtest_multiple_trades_alternating(self, basic_strategy, sample_market_data):
         """Test with alternating buy/sell based on sample_market_data and zero spread."""
@@ -129,11 +143,12 @@ class TestBacktester:
 
         backtester.run_backtest(spread_bps=0, order_size=strategy_order_size)
 
-        results = backtester.get_results()
-        assert len(results) == len(sample_market_data), "Should trade on every tick with 0 spread"
+        results_dict = backtester.get_results()
+        trades_log = results_dict['trades']
+        summary_stats = results_dict['summary_stats']
 
-        expected_pnl = 0
-        expected_inventory = 0
+        assert len(trades_log) == len(sample_market_data), "Should trade on every tick with 0 spread"
+        assert summary_stats['total_trades'] == len(sample_market_data)
 
         # Manually calculate expected PnL and inventory
         # Tick 0: price=100.0, buyer_maker=False (SELL) -> PnL += 100.0 * 0.05 = 5.0; Inv -= 0.05
@@ -146,13 +161,15 @@ class TestBacktester:
         # Expected PnL = 5.0 - 5.005 + 4.995 - 5.0 + 5.01 - 4.99 = 0.01
         # Expected Inventory = -0.05 + 0.05 - 0.05 + 0.05 - 0.05 + 0.05 = 0.0
 
-        assert basic_strategy.pnl == pytest.approx(0.01)
-        assert basic_strategy.inventory == pytest.approx(0.0)
+        assert summary_stats['final_pnl'] == pytest.approx(0.01)
+        assert summary_stats['final_inventory'] == pytest.approx(0.0)
+        assert basic_strategy.pnl == pytest.approx(0.01) # Direct check
+        assert basic_strategy.inventory == pytest.approx(0.0) # Direct check
 
-        assert results[0]['type'] == 'sell'
-        assert results[0]['price'] == sample_market_data['price'][0]
-        assert results[1]['type'] == 'buy'
-        assert results[1]['price'] == sample_market_data['price'][1]
+        assert trades_log[0]['type'] == 'sell'
+        assert trades_log[0]['price'] == sample_market_data['price'][0]
+        assert trades_log[1]['type'] == 'buy'
+        assert trades_log[1]['price'] == sample_market_data['price'][1]
         # ... and so on
 
     def test_backtest_order_size_respected(self):
@@ -169,8 +186,87 @@ class TestBacktester:
         test_order_size = 0.07
         backtester.run_backtest(spread_bps=0, order_size=test_order_size)
 
+        results_dict = backtester.get_results()
+        trades_log = results_dict['trades']
+        summary_stats = results_dict['summary_stats']
+
         assert strategy.quote_size == test_order_size, "Strategy's quote_size not updated by backtester"
-        assert len(backtester.get_results()) == 1
-        assert backtester.get_results()[0]['size'] == test_order_size, "Logged trade size incorrect"
-        assert strategy.pnl == pytest.approx(100.0 * test_order_size)
-        assert strategy.inventory == pytest.approx(-test_order_size)
+        assert len(trades_log) == 1
+        assert trades_log[0]['size'] == test_order_size, "Logged trade size incorrect"
+        assert summary_stats['final_pnl'] == pytest.approx(100.0 * test_order_size)
+        assert summary_stats['final_inventory'] == pytest.approx(-test_order_size)
+        assert strategy.pnl == pytest.approx(100.0 * test_order_size) # Direct check
+        assert strategy.inventory == pytest.approx(-test_order_size) # Direct check
+
+    def test_get_results_structure_and_new_fields(self, sample_market_data, basic_strategy):
+        """Test the structure of get_results and the presence of new fields."""
+        test_spread_bps = 20  # e.g., 0.2%
+        test_order_size = 0.05
+
+        backtester = Backtester(data=sample_market_data, strategy=basic_strategy)
+        # Run with some trades expected to populate logs, non-zero spread
+        backtester.run_backtest(spread_bps=test_spread_bps, order_size=test_order_size)
+
+        results = backtester.get_results()
+
+        assert isinstance(results, dict), "get_results should return a dictionary"
+
+        # Check top-level keys
+        expected_top_keys = ['parameters', 'trades', 'tick_data', 'summary_stats']
+        for key in expected_top_keys:
+            assert key in results, f"Missing top-level key '{key}' in results"
+
+        # Check 'parameters'
+        assert isinstance(results['parameters'], dict)
+        assert 'spread_bps' in results['parameters']
+        assert results['parameters']['spread_bps'] == test_spread_bps
+        assert 'order_size' in results['parameters']
+        assert results['parameters']['order_size'] == test_order_size
+
+        # Check 'summary_stats'
+        assert isinstance(results['summary_stats'], dict)
+        expected_summary_keys = ['final_pnl', 'total_trades', 'final_inventory']
+        for key in expected_summary_keys:
+            assert key in results['summary_stats'], f"Missing key '{key}' in summary_stats"
+        assert isinstance(results['summary_stats']['final_pnl'], float)
+        assert isinstance(results['summary_stats']['total_trades'], int)
+        assert isinstance(results['summary_stats']['final_inventory'], float)
+
+
+        # Check 'trades' list and content of its dictionaries
+        assert isinstance(results['trades'], list)
+        if results['trades']: # If there are any trades
+            first_trade = results['trades'][0]
+            assert isinstance(first_trade, dict)
+            # Check for essential existing keys and new keys
+            expected_trade_keys = ['time', 'type', 'price', 'size', 'pnl', 'inventory',
+                                   'market_price_at_trade', 'bid_at_trade', 'ask_at_trade']
+            for key in expected_trade_keys:
+                assert key in first_trade, f"Trade entry missing key '{key}'"
+
+            assert 'bid_at_trade' in first_trade, "trades log missing 'bid_at_trade'"
+            assert 'ask_at_trade' in first_trade, "trades log missing 'ask_at_trade'"
+            # Values for bid/ask at trade can be float or None
+            assert isinstance(first_trade['bid_at_trade'], (float, type(None)))
+            assert isinstance(first_trade['ask_at_trade'], (float, type(None)))
+
+        # Check 'tick_data' list and content of its dictionaries
+        assert isinstance(results['tick_data'], list)
+        # Tick data should always be present, one entry per input market data tick
+        assert len(results['tick_data']) == len(sample_market_data), \
+            f"Expected {len(sample_market_data)} tick data entries, got {len(results['tick_data'])}"
+
+        if results['tick_data']:
+            first_tick = results['tick_data'][0]
+            assert isinstance(first_tick, dict)
+            expected_tick_keys = ['time', 'market_price', 'bid_quote', 'ask_quote']
+            for key in expected_tick_keys:
+                assert key in first_tick, f"Tick data entry missing key '{key}'"
+
+            # Check types of values in tick_data
+            assert isinstance(first_tick['market_price'], float)
+            # Quotes can be None if strategy doesn't quote (e.g. market price missing at start for strategy)
+            assert isinstance(first_tick['bid_quote'], (float, type(None)))
+            assert isinstance(first_tick['ask_quote'], (float, type(None)))
+            # 'time' is pd.Timestamp from fixture, check if it's still that or string
+            assert isinstance(first_tick['time'], pd.Timestamp) # Based on sample_market_data fixture

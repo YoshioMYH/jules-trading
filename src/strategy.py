@@ -16,6 +16,8 @@ class MarketMakingStrategy:
         self.pnl: float = 0.0
         self.inventory: float = 0.0  # Amount of base asset held
         self.quote_size: float = quote_size
+        self.last_bid_quote: float | None = None
+        self.last_ask_quote: float | None = None
 
     def update_market_price(self, current_price: float):
         """
@@ -38,11 +40,16 @@ class MarketMakingStrategy:
             A tuple (bid_price, ask_price). Returns (None, None) if the current market price is not available.
         """
         if self.current_market_price is None:
+            self.last_bid_quote = None
+            self.last_ask_quote = None
             return None, None
 
         half_spread_multiplier = spread_bps / 10000 / 2
         bid_price = self.current_market_price * (1 - half_spread_multiplier)
         ask_price = self.current_market_price * (1 + half_spread_multiplier)
+
+        self.last_bid_quote = bid_price
+        self.last_ask_quote = ask_price
 
         return bid_price, ask_price
 

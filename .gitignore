@@ -155,7 +155,7 @@ dmypy.json
 .pyre/
 
 # pytype static type analyzer
-.pytype/
+.type/
 
 # Cython debug symbols
 cython_debug/
@@ -194,3 +194,4 @@ cython_debug/
 .cursorindexingignore
 
 **/*.png
+backtest_results.json
