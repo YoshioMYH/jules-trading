@@ -1,3 +1,5 @@
+import json # Added
+import datetime # Added
 import pandas as pd
 import numpy as np
 
@@ -54,3 +56,30 @@ if __name__ == '__main__':
     shuffled_df_error = permute_trade_data(sample_df, 'non_existent_column')
     print("\nDataFrame with non-existent column shuffle attempt:")
     print(shuffled_df_error)
+
+
+class DateTimeEncoder(json.JSONEncoder):
+    """
+    Custom JSON encoder to handle datetime.datetime and pd.Timestamp objects.
+    Converts them to ISO 8601 string format.
+    """
+    def default(self, o):
+        if isinstance(o, (datetime.datetime, pd.Timestamp)):
+            return o.isoformat()
+        return super().default(o)
+
+# You can add a simple test or example usage here if desired, for example:
+if __name__ == '__main__': # This block will be shadowed by the one above if not integrated
+    data_with_dates = {
+        "name": "Test",
+        "timestamp_dt": datetime.datetime.now(),
+        "timestamp_pd": pd.Timestamp.now(),
+        "other_val": 123
+    }
+    print("Original data:", data_with_dates)
+    try:
+        json_string = json.dumps(data_with_dates, cls=DateTimeEncoder, indent=4)
+        print("\nSerialized JSON string:")
+        print(json_string)
+    except Exception as e:
+        print(f"Error during serialization: {e}")

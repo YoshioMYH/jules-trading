@@ -1,10 +1,12 @@
 import argparse
+import json
 
 import pandas as pd
 from tqdm import tqdm
 
 from src.data_loader import load_trade_data  # For example usage
 from src.strategy import MarketMakingStrategy
+from src.utils import DateTimeEncoder # Added import
 
 
 class Backtester:
@@ -24,6 +26,9 @@ class Backtester:
         self.data = data
         self.strategy = strategy
         self.trades_log = []
+        self.tick_data_log = []
+        self.current_spread_bps: int | None = None
+        self.current_order_size: float | None = None
 
     def run_backtest(self, spread_bps: int, order_size: float):
         """
@@ -35,8 +40,11 @@ class Backtester:
             spread_bps: The spread in basis points for the strategy to use.
             order_size: The size of orders the strategy should place.
         """
+        self.current_spread_bps = spread_bps
+        self.current_order_size = order_size
         self.strategy.quote_size = order_size # Set the order size for the strategy
         self.trades_log = [] # Reset log for new backtest run
+        self.tick_data_log = [] # Reset tick data log for new backtest run
 
         if self.data.empty:
             print("Data is empty, cannot run backtest.")
@@ -56,11 +64,20 @@ class Backtester:
             # Strategy generates new quotes
             bid_quote, ask_quote = self.strategy.generate_quotes(spread_bps=spread_bps)
 
+            # Log tick data
+            self.tick_data_log.append({
+                'time': current_time,
+                'market_price': market_price,
+                'bid_quote': self.strategy.last_bid_quote,
+                'ask_quote': self.strategy.last_ask_quote
+            })
+
             # if index < 5 or index > len(self.data) - 6: # Debug print for first/last few ticks
             #     print(f"TICK {index}: Time={current_time}, MarketPrice={market_price:.2f}, BuyerMaker={buyer_maker_from_data}, BidQuote={bid_quote:.2f} AskQuote={ask_quote:.2f}" if bid_quote else f"TICK {index}: MarketPrice={market_price:.2f}, No quotes")
 
             if bid_quote is None or ask_quote is None:
                 # Strategy might not have enough info to quote yet (e.g., at the very start)
+                # or decided not to quote based on its logic (although current strategy always quotes if market price is available)
                 continue
 
             # Trade Logic:
@@ -82,7 +99,9 @@ class Backtester:
                     'size': self.strategy.quote_size,
                     'pnl': self.strategy.pnl,
                     'inventory': self.strategy.inventory,
-                    'market_price_at_trade': market_price # Market price that triggered the trade
+                    'market_price_at_trade': market_price, # Market price that triggered the trade
+                    'bid_at_trade': self.strategy.last_bid_quote,
+                    'ask_at_trade': self.strategy.last_ask_quote
                 })
 
             # Check if our BID (strategy's buy order) is hit:
@@ -100,19 +119,33 @@ class Backtester:
                     'size': self.strategy.quote_size,
                     'pnl': self.strategy.pnl,
                     'inventory': self.strategy.inventory,
-                    'market_price_at_trade': market_price # Market price that triggered the trade
+                    'market_price_at_trade': market_price, # Market price that triggered the trade
+                    'bid_at_trade': self.strategy.last_bid_quote,
+                    'ask_at_trade': self.strategy.last_ask_quote
                 })
 
         print(f"Backtest finished. Total PnL: {self.strategy.pnl:.2f}, Final Inventory: {self.strategy.inventory:.4f}")
 
-    def get_results(self) -> list[dict]:
+    def get_results(self) -> dict:
         """
-        Returns the log of simulated trades.
+        Returns the results of the backtest.
 
         Returns:
-            A list of dictionaries, where each dictionary represents a trade execution.
+            A dictionary containing parameters, trades log, tick data log, and summary statistics.
         """
-        return self.trades_log
+        return {
+            'parameters': {
+                'spread_bps': self.current_spread_bps,
+                'order_size': self.current_order_size,
+            },
+            'trades': self.trades_log,
+            'tick_data': self.tick_data_log,
+            'summary_stats': {
+                'final_pnl': self.strategy.pnl,
+                'total_trades': len(self.trades_log),
+                'final_inventory': self.strategy.inventory,
+            }
+        }
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Market Making Strategy Backtester")
@@ -149,22 +182,46 @@ if __name__ == '__main__':
 
         # 5. Get and print results
         results = backtester_instance.get_results()
-        print(f"\nNumber of trades executed by strategy: {len(results)}")
+        trades_log = results['trades']
+        tick_data_log = results['tick_data']
+        summary_stats = results['summary_stats']
+        parameters = results['parameters']
 
-        if results:
-            print("First 5 trades executed by the strategy:")
-            for trade in results[:5]:
+        print(f"\n--- Backtest Results ---")
+        print(f"Parameters: {parameters}")
+        print(f"Summary Stats: {summary_stats}")
+
+        if tick_data_log:
+            print("\nFirst 5 entries from Tick Data Log:")
+            for tick_entry in tick_data_log[:5]:
+                print(tick_entry)
+        else:
+            print("\nTick Data Log is empty.")
+
+        if trades_log:
+            print("\nFirst 5 trades executed by the strategy:")
+            for trade in trades_log[:5]:
                 print(trade)
+        else:
+            print("\nNo trades were executed by the strategy.")
 
-        print(f"\nFinal PnL from strategy: {backtester_instance.strategy.pnl:.2f}")
-        print(f"Final Inventory from strategy: {backtester_instance.strategy.inventory:.4f}")
+        # 6. Save full results to JSON
+        # Manual datetime conversion loops removed. DateTimeEncoder will handle it.
 
-        # Example of how one might plot PnL over time (if matplotlib is installed)
+        results_file_name = "backtest_results.json"
+        try:
+            with open(results_file_name, 'w') as f:
+                json.dump(results, f, indent=4, default=str)
+            print(f"\nFull backtest results saved to {results_file_name}")
+        except Exception as e:
+            print(f"\nError saving results to JSON: {e}")
+
+        # 7. Example of how one might plot PnL over time (if matplotlib is installed)
         try:
             import matplotlib.pyplot as plt
-            pnl_over_time = [trade['pnl'] for trade in results]
-            trade_times = [trade['time'] for trade in results]
-            if pnl_over_time:
+            if trades_log:
+                pnl_over_time = [trade['pnl'] for trade in trades_log]
+                trade_times = [trade['time'] for trade in trades_log] # Assuming time is suitable for plotting
                 plt.figure(figsize=(10, 6))
                 plt.plot(trade_times, pnl_over_time, marker='o', linestyle='-')
                 plt.title('Strategy PnL Over Time')
@@ -174,7 +231,7 @@ if __name__ == '__main__':
                 plt.savefig('pnl_over_time.png')
                 print("\nSaved PnL plot to pnl_over_time.png")
             else:
-                print("\nNo trades to plot.")
+                print("\nNo trades to plot PnL.")
         except ImportError:
             print("\nMatplotlib not installed. Skipping PnL plot.")
         except Exception as e:
