@@ -177,53 +177,39 @@ if data:
                     )
                     # Ensure market_visible_points is an int for calculations
                     market_visible_points_val = int(market_visible_points)
-                    if market_total_points > market_visible_points_val:
-                        market_start_point = st.slider(
-                            "Market data starting point",
-                            min_value=0,
-                            max_value=max(0, market_total_points - market_visible_points_val),
-                            value=0,
-                            step=market_visible_points_val, # Step by the number of visible points
-                            key="market_start_point" # Unique key
-                        )
-                    else:
-                        market_start_point = 0
+                    # market_start_point slider and associated filtering logic removed.
 
-                    # Filter tick_df based on sliders first
-                    tick_df_filtered = tick_df.iloc[market_start_point : market_start_point + market_visible_points]
+                    # Prepare data for Plotly by melting the full tick_df (after initial column availability checks)
+                    # 'time' column is already pd.to_datetime from the initial load of tick_df
 
-                    # Prepare data for Plotly by melting
-                    # Reset index to bring 'time' back as a column if it was set as index
-                    # However, tick_df['time'] is already a column, so no need to reset_index if we directly use tick_df_filtered
+                    # plot_columns was defined earlier based on available data in the full tick_df
+                    final_plot_columns_full = [col for col in plot_columns if col in tick_df.columns]
 
-                    # Ensure 'time' is datetime
-                    tick_df_filtered['time'] = pd.to_datetime(tick_df_filtered['time'])
-
-                    # Select relevant columns for melting
-                    columns_to_melt = ['time'] + [col for col in plot_columns if col in tick_df_filtered.columns]
-
-                    # Ensure plot_columns exist in tick_df_filtered before melting
-                    final_plot_columns = [col for col in plot_columns if col in tick_df_filtered.columns]
-
-                    if len(final_plot_columns) > 0 : # only proceed if there are columns to plot
-                        melted_df = tick_df_filtered[['time'] + final_plot_columns].melt(
+                    if len(final_plot_columns_full) > 0:
+                        # Melt the full tick_df data that has the necessary columns
+                        melted_df_full = tick_df[['time'] + final_plot_columns_full].melt(
                             id_vars=['time'],
-                            value_vars=final_plot_columns,
+                            value_vars=final_plot_columns_full,
                             var_name='variable',
                             value_name='value'
                         )
+                        melted_df_full['value'] = pd.to_numeric(melted_df_full['value'], errors='coerce')
 
-                        # Convert 'value' to numeric, coercing errors for potentially mixed types if quotes are missing
-                        melted_df['value'] = pd.to_numeric(melted_df['value'], errors='coerce')
-
-                        if not melted_df.empty:
-                            fig_market = px.line(melted_df, x='time', y='value', color='variable', title="Market Price and Quotes")
+                        if not melted_df_full.empty:
+                            fig_market = px.line(melted_df_full, x='time', y='value', color='variable', title="Market Price and Quotes")
+                            # Implement initial zoom based on market_visible_points_val
+                            if market_visible_points_val > 0 and len(tick_df) > 1:
+                                end_idx = min(market_visible_points_val - 1, len(tick_df) - 1)
+                                if end_idx > 0: # Ensure there's a valid range
+                                    # Check if start and end time are different
+                                    if tick_df['time'].iloc[0] != tick_df['time'].iloc[end_idx]:
+                                        fig_market.update_layout(xaxis_range=[tick_df['time'].iloc[0], tick_df['time'].iloc[end_idx]])
+                                    # Else, Plotly will auto-range
                             st.plotly_chart(fig_market, use_container_width=True)
                         else:
-                            st.info("No data to display for the selected market data range after filtering/melting.")
+                            st.info("No data to display for market prices and quotes after processing.")
                     else:
-                        st.warning("Selected columns for market plot are not available in the filtered data.")
-
+                        st.warning("Selected columns for market plot are not available in the data.")
                 else:
                     st.info("No Market data points to plot.")
             else:
