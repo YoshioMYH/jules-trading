@@ -72,20 +72,24 @@ if data:
 
             # Sliders for PnL chart
             total_points = len(pnl_df)
-            if total_points > 0: # Ensure there's data before creating sliders
-                pnl_visible_points = st.slider(
+            if total_points > 0: # Ensure there's data before creating controls
+                pnl_visible_points = st.number_input(
                     "Number of PnL data points to display",
-                    min_value=1,
-                    max_value=total_points,
-                    value=min(100, total_points), # Default to 100 or total_points if less
-                    key="pnl_visible_points"
+                    min_value=10,
+                    max_value=max(10, total_points), # Ensure max_value is at least min_value
+                    value=min(50, total_points), # Default to 50 or total_points if less
+                    step=10,
+                    key="pnl_visible_points_input"
                 )
-                if total_points > pnl_visible_points:
+                # Ensure pnl_visible_points is an int for calculations
+                pnl_visible_points_val = int(pnl_visible_points)
+                if total_points > pnl_visible_points_val:
                     pnl_start_point = st.slider(
                         "PnL data starting point",
                         min_value=0,
-                        max_value=total_points - pnl_visible_points,
+                        max_value=max(0, total_points - pnl_visible_points_val),
                         value=0,
+                        step=pnl_visible_points_val, # Step by the number of visible points
                         key="pnl_start_point"
                     )
                 else:
@@ -118,20 +122,24 @@ if data:
 
             # Sliders for Inventory chart
             inv_total_points = len(inventory_df)
-            if inv_total_points > 0: # Ensure there's data before creating sliders
-                inv_visible_points = st.slider(
+            if inv_total_points > 0: # Ensure there's data before creating controls
+                inv_visible_points = st.number_input(
                     "Number of Inventory data points to display",
-                    min_value=1,
-                    max_value=inv_total_points,
-                    value=min(100, inv_total_points), # Default to 100 or total_points if less
-                    key="inv_visible_points" # Unique key
+                    min_value=10,
+                    max_value=max(10, inv_total_points),
+                    value=min(50, inv_total_points),
+                    step=10,
+                    key="inv_visible_points_input" # Unique key
                 )
-                if inv_total_points > inv_visible_points:
+                # Ensure inv_visible_points is an int for calculations
+                inv_visible_points_val = int(inv_visible_points)
+                if inv_total_points > inv_visible_points_val:
                     inv_start_point = st.slider(
                         "Inventory data starting point",
                         min_value=0,
-                        max_value=inv_total_points - inv_visible_points,
+                        max_value=max(0, inv_total_points - inv_visible_points_val),
                         value=0,
+                        step=inv_visible_points_val, # Step by the number of visible points
                         key="inv_start_point" # Unique key
                     )
                 else:
@@ -173,19 +181,23 @@ if data:
                 # Sliders for Market Data chart
                 market_total_points = len(tick_df)
                 if market_total_points > 0:
-                    market_visible_points = st.slider(
+                    market_visible_points = st.number_input(
                         "Number of Market data points to display",
-                        min_value=1,
-                        max_value=market_total_points,
-                        value=min(100, market_total_points),
-                        key="market_visible_points" # Unique key
+                        min_value=10,
+                        max_value=max(10, market_total_points),
+                        value=min(50, market_total_points),
+                        step=10,
+                        key="market_visible_points_input" # Unique key
                     )
-                    if market_total_points > market_visible_points:
+                    # Ensure market_visible_points is an int for calculations
+                    market_visible_points_val = int(market_visible_points)
+                    if market_total_points > market_visible_points_val:
                         market_start_point = st.slider(
                             "Market data starting point",
                             min_value=0,
-                            max_value=market_total_points - market_visible_points,
+                            max_value=max(0, market_total_points - market_visible_points_val),
                             value=0,
+                            step=market_visible_points_val, # Step by the number of visible points
                             key="market_start_point" # Unique key
                         )
                     else:
