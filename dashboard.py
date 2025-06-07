@@ -83,46 +83,40 @@ if data:
                 )
                 # Ensure pnl_visible_points is an int for calculations
                 pnl_visible_points_val = int(pnl_visible_points)
-                if total_points > pnl_visible_points_val:
-                    pnl_start_point = st.slider(
-                        "PnL data starting point",
-                        min_value=0,
-                        max_value=max(0, total_points - pnl_visible_points_val),
-                        value=0,
-                        step=pnl_visible_points_val, # Step by the number of visible points
-                        key="pnl_start_point"
-                    )
-                else:
-                    pnl_start_point = 0 # No need for a start slider if all points are visible
+                # pnl_start_point slider and associated filtering logic removed.
 
-                # Filter data based on sliders
-                pnl_df_filtered = pnl_df.iloc[pnl_start_point : pnl_start_point + pnl_visible_points]
-
-                # Plotly chart
-                if not pnl_df_filtered.empty:
-                    fig = px.line(pnl_df_filtered, x='time', y='pnl', title="PnL Over Time")
+                # Plotly chart using the full pnl_df
+                if not pnl_df.empty:
+                    fig = px.line(pnl_df, x='time', y='pnl', title="PnL Over Time")
+                    if pnl_visible_points_val > 0 and len(pnl_df) > 1:
+                        end_idx = min(pnl_visible_points_val -1, len(pnl_df) - 1) # -1 because iloc is 0-indexed
+                        if end_idx > 0: # Ensure there's a valid range
+                             # Check if start and end time are different to avoid Plotly error/warning
+                            if pnl_df['time'].iloc[0] != pnl_df['time'].iloc[end_idx]:
+                                fig.update_layout(xaxis_range=[pnl_df['time'].iloc[0], pnl_df['time'].iloc[end_idx]])
+                            # If start and end time are the same (e.g. end_idx is 0 after -1, or all times are identical for the range)
+                            # Plotly will auto-range, which is acceptable.
                     st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.info("No data to display for the selected PnL range.")
+                    st.info("No PnL data to display.")
             else:
                 st.info("No PnL data points to plot.")
         else:
             st.warning("PnL data ('time' or 'pnl' column) not found in trades.")
     else:
-        st.info("No trade data to plot PnL.") # This else might be redundant if the one above catches it.
-                                            # However, data['trades'] could exist but be empty or lack columns.
+        st.info("No trade data to plot PnL.")
 
     # 4. Plot Inventory Over Time
-    if 'trades' in data and data['trades']: # Assumes it's under the same "Performance Analysis" header
+    if 'trades' in data and data['trades']:
         inventory_df = pd.DataFrame(data['trades'])
         if 'time' in inventory_df.columns and 'inventory' in inventory_df.columns:
             inventory_df['time'] = pd.to_datetime(inventory_df['time'])
             inventory_df = inventory_df.sort_values(by='time')
             st.subheader("Inventory Over Time")
 
-            # Sliders for Inventory chart
+            # Number input for Inventory chart
             inv_total_points = len(inventory_df)
-            if inv_total_points > 0: # Ensure there's data before creating controls
+            if inv_total_points > 0:
                 inv_visible_points = st.number_input(
                     "Number of Inventory data points to display",
                     min_value=10,
@@ -133,27 +127,19 @@ if data:
                 )
                 # Ensure inv_visible_points is an int for calculations
                 inv_visible_points_val = int(inv_visible_points)
-                if inv_total_points > inv_visible_points_val:
-                    inv_start_point = st.slider(
-                        "Inventory data starting point",
-                        min_value=0,
-                        max_value=max(0, inv_total_points - inv_visible_points_val),
-                        value=0,
-                        step=inv_visible_points_val, # Step by the number of visible points
-                        key="inv_start_point" # Unique key
-                    )
-                else:
-                    inv_start_point = 0 # No need for a start slider if all points are visible
+                # inv_start_point slider and associated filtering logic removed.
 
-                # Filter data based on sliders
-                inv_df_filtered = inventory_df.iloc[inv_start_point : inv_start_point + inv_visible_points]
-
-                # Plotly chart
-                if not inv_df_filtered.empty:
-                    fig_inv = px.line(inv_df_filtered, x='time', y='inventory', title="Inventory Over Time")
+                # Plotly chart using the full inventory_df
+                if not inventory_df.empty:
+                    fig_inv = px.line(inventory_df, x='time', y='inventory', title="Inventory Over Time")
+                    if inv_visible_points_val > 0 and len(inventory_df) > 1:
+                        end_idx = min(inv_visible_points_val -1, len(inventory_df) - 1)
+                        if end_idx > 0:
+                            if inventory_df['time'].iloc[0] != inventory_df['time'].iloc[end_idx]:
+                                fig_inv.update_layout(xaxis_range=[inventory_df['time'].iloc[0], inventory_df['time'].iloc[end_idx]])
                     st.plotly_chart(fig_inv, use_container_width=True)
                 else:
-                    st.info("No data to display for the selected Inventory range.")
+                    st.info("No Inventory data to display.")
             else:
                 st.info("No Inventory data points to plot.")
         else:
