@@ -211,7 +211,7 @@ if __name__ == '__main__':
         results_file_name = "backtest_results.json"
         try:
             with open(results_file_name, 'w') as f:
-                json.dump(results, f, indent=4, cls=DateTimeEncoder) # Used DateTimeEncoder
+                json.dump(results, f, indent=4, default=str)
             print(f"\nFull backtest results saved to {results_file_name}")
         except Exception as e:
             print(f"\nError saving results to JSON: {e}")

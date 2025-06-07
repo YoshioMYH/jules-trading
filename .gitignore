@@ -194,4 +194,4 @@ cython_debug/
 .cursorindexingignore
 
 **/*.png
-backtest_results.json
+**/*.json
