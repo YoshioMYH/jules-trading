@@ -1,136 +1,409 @@
-class MarketMakingStrategy:
-    """
-    A simple market making strategy that places bid and ask quotes around a current market price.
-    It also tracks Profit and Loss (PnL) and inventory.
-    """
+import logging
 
-    def __init__(self, quote_size: float):
+logger = logging.getLogger(__name__)
+
+# MarketMakingStrategy class and its comments have been removed.
+# The TODO regarding its __main__ block is also removed as the class is gone.
+
+class SimpleMarketMakerStrategy:
+    def __init__(self, exchange, symbol, order_size, price_levels, increment, strategy_id="SMM"):
         """
-        Initializes the MarketMakingStrategy.
+        Initializes the SimpleMarketMakerStrategy.
 
         Args:
-            quote_size: The amount of base asset to be used for each quote.
-                        This is the amount the strategy is willing to buy or sell at its quoted prices.
+            exchange: The exchange object to interact with (for backtesting, this will be a mock).
+            symbol: The trading symbol (e.g., 'BTC/USD').
+            order_size: The size of each buy/sell order.
+            price_levels: A list of specific price levels to place buy orders.
+            increment: The fixed price increment for sell orders.
+            strategy_id: An identifier for this strategy instance.
         """
-        self.current_market_price: float | None = None
-        self.pnl: float = 0.0
-        self.inventory: float = 0.0  # Amount of base asset held
-        self.quote_size: float = quote_size
-        self.last_bid_quote: float | None = None
-        self.last_ask_quote: float | None = None
+        self.exchange = exchange # In backtesting, this is the Backtester's mock exchange interface
+        self.symbol = symbol
+        self.order_size = order_size
+        self.price_levels = sorted(price_levels)
+        self.increment = increment
+        self.inventory = 0.0
+        self.active_buy_orders = {}  # price: order_id
+        self.active_sell_orders = {} # price: order_id
+        self.filled_buy_orders = {} # order_id: {'price': price, 'size': size, 'status': 'filled'}
+        self.pnl = 0.0 # Strategy specific PnL tracking
+        self.strategy_id = strategy_id
 
-    def update_market_price(self, current_price: float):
+        self.available_balance = 0.0 # Set by backtester via update_balance_and_max_entries
+        self.max_entry_points = 0  # Set by backtester via update_balance_and_max_entries
+
+        logger.info(f"SimpleMarketMakerStrategy {self.strategy_id} initialized for {self.symbol}")
+        logger.info(f"Order size: {self.order_size}, Price Levels: {self.price_levels}, Increment: {self.increment}")
+
+    def update_balance_and_max_entries(self, balance: float):
+        """Called by the backtester to set the current available capital for the strategy."""
+        self.available_balance = balance
+        self.max_entry_points = self._calculate_max_entry_points_internal()
+        logger.info(f"Strategy {self.strategy_id} balance updated to: {self.available_balance}. Max entry points recalculated: {self.max_entry_points}")
+
+    def _calculate_max_entry_points_internal(self) -> int:
         """
-        Updates the current market price observed by the strategy.
-
-        Args:
-            current_price: The latest market price.
+        Internal helper to calculate max entry points based on current available_balance.
         """
-        self.current_market_price = current_price
+        if self.order_size <= 0 or self.available_balance <= 0:
+            return 0
+        if not self.price_levels:
+            return 0
 
-    def generate_quotes(self, spread_bps: int) -> tuple[float | None, float | None]:
+        lowest_buy_price = self.price_levels[0]
+        if lowest_buy_price <= 0: # Price must be positive
+            return 0
+
+        estimated_cost_per_order = lowest_buy_price * self.order_size
+        if estimated_cost_per_order <= 0: # Cost must be positive
+            return 0
+        return int(self.available_balance / estimated_cost_per_order)
+
+    def place_initial_buy_orders(self):
         """
-        Generates bid and ask quotes based on the current market price and a given spread.
-
-        Args:
-            spread_bps: The desired spread in basis points (1 bps = 0.01%).
-                        The bid and ask prices will be set symmetrically around the current market price.
-
-        Returns:
-            A tuple (bid_price, ask_price). Returns (None, None) if the current market price is not available.
+        Places initial buy orders at specified price levels, up to max_entry_points.
+        This method is called by the strategy itself (e.g. in run()) or by the backtester.
         """
-        if self.current_market_price is None:
-            self.last_bid_quote = None
-            self.last_ask_quote = None
-            return None, None
+        logger.info(f"Strategy {self.strategy_id}: Placing initial buy orders. Max entries: {self.max_entry_points}, Current active: {len(self.active_buy_orders)}")
+        placed_count = 0
+        if self.max_entry_points == 0:
+            logger.warning(f"Strategy {self.strategy_id}: Max entry points is 0. Cannot place initial buy orders. Check capital allocation.")
+            return
 
-        half_spread_multiplier = spread_bps / 10000 / 2
-        bid_price = self.current_market_price * (1 - half_spread_multiplier)
-        ask_price = self.current_market_price * (1 + half_spread_multiplier)
+        for price in self.price_levels:
+            if len(self.active_buy_orders) >= self.max_entry_points:
+                logger.warning(f"Strategy {self.strategy_id}: Reached max active buy orders ({self.max_entry_points}). Cannot place more initial buys.")
+                break
+            if price not in self.active_buy_orders:
+                try:
+                    order_id = self.exchange.place_limit_buy_order(
+                        symbol=self.symbol,
+                        size=self.order_size,
+                        price=price,
+                        strategy_id=self.strategy_id
+                    )
+                    if order_id:
+                        self.active_buy_orders[price] = order_id
+                        placed_count += 1
+                        logger.info(f"Strategy {self.strategy_id}: Placed initial BUY order {order_id} for {self.order_size} {self.symbol} at {price}")
+                    else:
+                        logger.error(f"Strategy {self.strategy_id}: Failed to place initial BUY order at {price} (no ID returned by exchange mock).")
+                except Exception as e:
+                    logger.error(f"Strategy {self.strategy_id}: Error placing initial BUY order at {price}: {e}")
+            else:
+                logger.info(f"Strategy {self.strategy_id}: Buy order already active at price {price}. Skipping.")
+        logger.info(f"Strategy {self.strategy_id}: Placed {placed_count} initial buy orders.")
+        if not self.active_buy_orders and self.price_levels and self.max_entry_points > 0:
+             logger.warning(f"Strategy {self.strategy_id}: No buy orders were placed despite available entry points. Check exchange interaction or order placement logic.")
 
-        self.last_bid_quote = bid_price
-        self.last_ask_quote = ask_price
-
-        return bid_price, ask_price
-
-    def execute_trade(self, trade_price: float, trade_size: float, is_buy_order: bool):
+    def handle_filled_order(self, order_id: str, filled_price: float, filled_size: float, fee: float = 0.0) -> str:
         """
-        Records a trade execution, updating PnL and inventory.
-
-        This method is called by the backtester when one of the strategy's quotes is hit.
-
-        Args:
-            trade_price: The price at which the trade was executed.
-            trade_size: The amount of asset traded.
-            is_buy_order: True if the strategy's buy quote was hit (strategy buys),
-                          False if the strategy's sell quote was hit (strategy sells).
+        Handles a filled order notification from the backtester.
+        Updates inventory, PnL, and places new orders as per strategy logic.
+        Returns a string indicating the type of fill handled ("buy_fill", "sell_fill", or "unknown_fill").
         """
-        if is_buy_order:
-            # Strategy buys the base asset
-            self.pnl -= trade_price * trade_size  # Cash decreases
-            self.inventory += trade_size         # Base asset increases
+        logger.info(f"Strategy {self.strategy_id}: Handling filled order {order_id}. Price: {filled_price}, Size: {filled_size}, Fee: {fee}")
+
+        buy_order_price_key = None
+        for price_key, active_id in self.active_buy_orders.items():
+            if active_id == order_id:
+                buy_order_price_key = price_key
+                break
+
+        if buy_order_price_key is not None:
+            logger.info(f"Strategy {self.strategy_id}: BUY order {order_id} at price {buy_order_price_key} filled.")
+            self.pnl -= (filled_price * filled_size) + fee
+            self.inventory += filled_size
+            self.filled_buy_orders[order_id] = {'price': filled_price, 'size': filled_size, 'status': 'filled', 'fee': fee}
+
+            del self.active_buy_orders[buy_order_price_key]
+            logger.info(f"Strategy {self.strategy_id}: Removed active BUY order {order_id} (price {buy_order_price_key}). PnL: {self.pnl:.4f}, Inv: {self.inventory:.4f}")
+
+            if self.inventory > 0:
+                sell_price = filled_price + self.increment
+                sell_size = filled_size
+
+                if sell_price in self.active_buy_orders:
+                    logger.warning(f"Strategy {self.strategy_id}: Proposed sell price {sell_price} conflicts with an active buy order. Skipping sell.")
+                elif sell_price in self.active_sell_orders:
+                     logger.warning(f"Strategy {self.strategy_id}: Sell order already active at price {sell_price}. Skipping duplicate sell.")
+                else:
+                    try:
+                        sell_order_id = self.exchange.place_limit_sell_order(
+                            symbol=self.symbol,
+                            size=sell_size,
+                            price=sell_price,
+                            strategy_id=self.strategy_id
+                        )
+                        if sell_order_id:
+                            self.active_sell_orders[sell_price] = sell_order_id
+                            logger.info(f"Strategy {self.strategy_id}: Placed SELL order {sell_order_id} for {sell_size} {self.symbol} at {sell_price}")
+                        else:
+                            logger.error(f"Strategy {self.strategy_id}: Failed to place SELL order at {sell_price} (no ID returned).")
+                    except Exception as e:
+                        logger.error(f"Strategy {self.strategy_id}: Error placing SELL order for BUY fill {order_id}: {e}")
+            else: # Should not happen if a buy just filled
+                logger.warning(f"Strategy {self.strategy_id}: Inventory is {self.inventory} after BUY fill. Cannot place sell order.")
+
+            self.place_new_buy_order_if_needed()
+            return "buy_fill"
+
+        sell_order_price_key = None
+        for price_key, active_id in self.active_sell_orders.items():
+            if active_id == order_id:
+                sell_order_price_key = price_key
+                break
+
+        if sell_order_price_key is not None:
+            logger.info(f"Strategy {self.strategy_id}: SELL order {order_id} at price {sell_order_price_key} filled.")
+            self.pnl += (filled_price * filled_size) - fee
+            self.inventory -= filled_size
+            del self.active_sell_orders[sell_order_price_key]
+            logger.info(f"Strategy {self.strategy_id}: Removed active SELL order {order_id} (price {sell_order_price_key}). PnL: {self.pnl:.4f}, Inv: {self.inventory:.4f}")
+            self.place_new_buy_order_if_needed()
+            return "sell_fill"
+
+        logger.warning(f"Strategy {self.strategy_id}: Filled order {order_id} not found in active BUY or SELL orders. Ignoring.")
+        return "unknown_fill"
+
+    def place_new_buy_order_if_needed(self):
+        """
+        Checks if new buy orders can be placed based on available slots (max_entry_points) and price levels.
+        """
+        if self.max_entry_points <= 0:
+            return
+
+        available_slots = self.max_entry_points - len(self.active_buy_orders)
+        if available_slots <= 0:
+            return
+
+        placed_new_count = 0
+        for price in self.price_levels:
+            if len(self.active_buy_orders) >= self.max_entry_points:
+                break
+
+            if price not in self.active_buy_orders:
+                try:
+                    order_id = self.exchange.place_limit_buy_order(
+                        symbol=self.symbol,
+                        size=self.order_size,
+                        price=price,
+                        strategy_id=self.strategy_id
+                    )
+                    if order_id:
+                        self.active_buy_orders[price] = order_id
+                        placed_new_count += 1
+                        logger.info(f"Strategy {self.strategy_id}: Placed new BUY order {order_id} at {price}.")
+                    else:
+                        logger.warning(f"Strategy {self.strategy_id}: Failed to place new BUY order at {price} (no ID returned - possibly backtester capital limit).")
+                        break
+                except Exception as e:
+                    logger.error(f"Strategy {self.strategy_id}: Error placing new BUY order at {price}: {e}")
+
+        if placed_new_count > 0:
+            logger.info(f"Strategy {self.strategy_id}: Placed {placed_new_count} new buy order(s). Active buys: {len(self.active_buy_orders)}.")
+
+    def cancel_order(self, order_id_to_cancel: str):
+        logger.info(f"Strategy {self.strategy_id}: Requesting to cancel order {order_id_to_cancel}")
+
+        price_key_to_remove = None
+        order_type = None
+
+        for price, oid in self.active_buy_orders.items():
+            if oid == order_id_to_cancel:
+                price_key_to_remove = price
+                order_type = "BUY"
+                break
+        if not order_type: # Check sell orders if not found in buys
+            for price, oid in self.active_sell_orders.items():
+                if oid == order_id_to_cancel:
+                    price_key_to_remove = price
+                    order_type = "SELL"
+                    break
+
+        if not order_type or price_key_to_remove is None:
+            logger.warning(f"Strategy {self.strategy_id}: Order {order_id_to_cancel} not found in active buy or sell orders for cancellation.")
+            return False
+
+        try:
+            if self.exchange.cancel_order(order_id_to_cancel, strategy_id=self.strategy_id):
+                logger.info(f"Strategy {self.strategy_id}: Cancellation request for {order_type} order {order_id_to_cancel} acknowledged by exchange mock.")
+                if order_type == "BUY":
+                    del self.active_buy_orders[price_key_to_remove]
+                    self.place_new_buy_order_if_needed() # If a buy was cancelled, try to place another
+                elif order_type == "SELL":
+                    del self.active_sell_orders[price_key_to_remove]
+
+                logger.info(f"Strategy {self.strategy_id}: Removed {order_type} order {order_id_to_cancel} from active tracking (price {price_key_to_remove}).")
+                return True
+            else:
+                logger.error(f"Strategy {self.strategy_id}: Exchange mock failed to confirm cancellation for order {order_id_to_cancel}.")
+                return False
+        except Exception as e:
+            logger.error(f"Strategy {self.strategy_id}: Error during cancel_order call to exchange mock for {order_id_to_cancel}: {e}")
+            return False
+
+    def run(self, initial_capital_allocation: float = None):
+        """
+        Called by the Backtester to start the strategy logic, like placing initial orders.
+        """
+        logger.info(f"Strategy {self.strategy_id}: run() called. Symbol: {self.symbol}")
+        if initial_capital_allocation is not None:
+            self.update_balance_and_max_entries(initial_capital_allocation)
         else:
-            # Strategy sells the base asset
-            self.pnl += trade_price * trade_size  # Cash increases
-            self.inventory -= trade_size         # Base asset decreases
+            # If no specific capital is given, try to use exchange's balance if available, or default.
+            try:
+                 current_bal = self.exchange.get_balance(strategy_id=self.strategy_id) # Assuming backtester provides this
+                 self.update_balance_and_max_entries(current_bal)
+            except Exception as e:
+                 logger.warning(f"Strategy {self.strategy_id}: Could not get initial balance from exchange for run(). Error: {e}. Max entries may be 0.")
+                 self.update_balance_and_max_entries(0.0)
 
+
+        self.place_initial_buy_orders()
+        logger.info(f"Strategy {self.strategy_id}: run() finished. Active buys: {len(self.active_buy_orders)}, Active sells: {len(self.active_sell_orders)}")
+
+    def check_order_statuses(self):
+        """
+        This method is less critical when the backtester pushes fill/cancellation updates.
+        It can be used for internal strategy health checks or handling expiries if applicable.
+        """
+        logger.info(f"Strategy {self.strategy_id}: check_order_statuses() called. Active buys: {len(self.active_buy_orders)}, Active sells: {len(self.active_sell_orders)}")
+        # For this assignment, the backtester will directly call handle_filled_order or update
+        # strategy based on its own order status checks. So, this method is mostly a placeholder.
+
+# --- Main execution block for SimpleMarketMakerStrategy (similar to the one drafted before) ---
 if __name__ == '__main__':
-    # Example Usage
-    strategy = MarketMakingStrategy(quote_size=0.1) # Strategy will quote for 0.1 units of base asset
+    # Setup basic logging for console output
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    main_logger = logging.getLogger(__name__) # Logger for this main block
 
-    # Simulate updating market price
-    strategy.update_market_price(100.0)
-    print(f"Initial PnL: {strategy.pnl}, Inventory: {strategy.inventory}")
+    # --- Mock Exchange for demonstration of SimpleMarketMakerStrategy ---
+    class MockExchangeSMM: # Renamed to avoid conflict if running both __main__ blocks
+        def __init__(self, initial_balance_map=None): # Takes a map {strategy_id: balance}
+            self.balance_map = initial_balance_map if initial_balance_map else {}
+            self.orders = {}
+            self.order_id_counter = 1
+            main_logger.info(f"MockExchangeSMM initialized with balance map: {self.balance_map}")
 
-    # Generate quotes
-    bid, ask = strategy.generate_quotes(spread_bps=20) # 20 bps spread (0.2%)
-    print(f"Generated quotes: Bid = {bid}, Ask = {ask} for size {strategy.quote_size}")
+        def get_balance(self, strategy_id=None): # Strategy asks for its own balance
+            balance = self.balance_map.get(strategy_id, 0.0)
+            main_logger.info(f"MockExchangeSMM: get_balance(stratID={strategy_id}) called, returning: {balance}")
+            return balance
 
-    if bid and ask:
-        # Simulate a scenario where our ask quote is hit (strategy sells)
-        print(f"\nSimulating our Ask quote being hit (strategy sells {strategy.quote_size} base asset at {ask})")
-        strategy.execute_trade(trade_price=ask, trade_size=strategy.quote_size, is_buy_order=False)
-        print(f"PnL after selling: {strategy.pnl:.2f}, Inventory: {strategy.inventory:.2f}")
+        def place_limit_buy_order(self, symbol, size, price, strategy_id=None):
+            order_id = f"buy_smm_{self.order_id_counter}"
+            self.order_id_counter += 1
+            # Cost calculation can be done here for logging or for a more complex mock
+            # For this mock, we assume the backtester (or strategy's allowance) manages funds.
+            self.orders[order_id] = {
+                'symbol': symbol, 'type': 'buy', 'size': size, 'price': price,
+                'status': 'open', 'filled_size': 0, 'filled_price': 0, 'strategy_id': strategy_id
+            }
+            main_logger.info(f"MockExchangeSMM (StratID {strategy_id}): Placed BUY order {order_id} for {size} {symbol} at {price}.")
+            return order_id
 
-        # Simulate a new market price
-        strategy.update_market_price(99.0)
-        new_bid, new_ask = strategy.generate_quotes(spread_bps=20)
-        print(f"\nNew market price: 99.0. Generated quotes: Bid = {new_bid}, Ask = {new_ask}")
+        def place_limit_sell_order(self, symbol, size, price, strategy_id=None):
+            order_id = f"sell_smm_{self.order_id_counter}"
+            self.order_id_counter += 1
+            self.orders[order_id] = {
+                'symbol': symbol, 'type': 'sell', 'size': size, 'price': price,
+                'status': 'open', 'filled_size': 0, 'filled_price': 0, 'strategy_id': strategy_id
+            }
+            main_logger.info(f"MockExchangeSMM (StratID {strategy_id}): Placed SELL order {order_id} for {size} {symbol} at {price}.")
+            return order_id
 
-        # Simulate a scenario where our bid quote is hit (strategy buys)
-        if new_bid:
-            print(f"\nSimulating our Bid quote being hit (strategy buys {strategy.quote_size} base asset at {new_bid})")
-            strategy.execute_trade(trade_price=new_bid, trade_size=strategy.quote_size, is_buy_order=True)
-            print(f"PnL after buying: {strategy.pnl:.2f}, Inventory: {strategy.inventory:.2f}")
+        def cancel_order(self, order_id, strategy_id=None):
+            if order_id in self.orders and self.orders[order_id]['status'] == 'open':
+                if self.orders[order_id].get('strategy_id') != strategy_id:
+                    main_logger.error(f"MockExchangeSMM (StratID {strategy_id}): Order {order_id} cannot be cancelled. Belongs to {self.orders[order_id].get('strategy_id')}.")
+                    return False
+                self.orders[order_id]['status'] = 'cancelled'
+                main_logger.info(f"MockExchangeSMM (StratID {strategy_id}): Cancelled order {order_id}.")
+                return True
+            main_logger.error(f"MockExchangeSMM (StratID {strategy_id}): Could not cancel order {order_id} (not found or not open).")
+            return False
 
-    # Test case: no market price
-    strategy_no_price = MarketMakingStrategy(quote_size=0.1)
-    bid_no_price, ask_no_price = strategy_no_price.generate_quotes(spread_bps=20)
-    print(f"\nQuotes with no market price: Bid = {bid_no_price}, Ask = {ask_no_price}")
+        def get_order_details(self, order_id): # Used by strategy's check_order_statuses (if ever more developed)
+            if order_id in self.orders:
+                return dict(self.orders[order_id])
+            return None
 
-    # Test PnL and inventory calculations carefully
-    strategy_test = MarketMakingStrategy(quote_size=1.0) # 1 unit of base asset
-    strategy_test.update_market_price(100)
-    test_bid, test_ask = strategy_test.generate_quotes(spread_bps=100) # 1% spread -> Bid 99.5, Ask 100.5
+        # --- Test Simulation Helper ---
+        def simulate_fill(self, order_id, fill_price, fill_size): # Simplified for test
+            if order_id in self.orders and self.orders[order_id]['status'] == 'open':
+                self.orders[order_id]['status'] = 'filled'
+                self.orders[order_id]['filled_price'] = fill_price
+                self.orders[order_id]['filled_size'] = fill_size
+                main_logger.info(f"MockExchangeSMM: Test fill for order {order_id} at {fill_price}, size {fill_size}.")
+                return True
+            main_logger.error(f"MockExchangeSMM: Test fill failed for order {order_id}.")
+            return False
 
-    print(f"\nTest Strategy: Initial PnL: {strategy_test.pnl}, Inventory: {strategy_test.inventory}")
-    print(f"Test Quotes: Bid={test_bid}, Ask={test_ask} for size {strategy_test.quote_size}")
+    main_logger.info("\n\n--- Starting SimpleMarketMakerStrategy Example ---")
+    strategy_id_main = "SMM_MainTest"
+    initial_capital_for_strategy = 2000.0
+    mock_exchange_smm = MockExchangeSMM(initial_balance_map={strategy_id_main: initial_capital_for_strategy})
 
-    # Sell 1 unit at ask price 100.5
-    strategy_test.execute_trade(trade_price=100.5, trade_size=1.0, is_buy_order=False)
-    print(f"After selling 1 unit at 100.5: PnL={strategy_test.pnl}, Inventory={strategy_test.inventory}") # PnL = 100.5, Inv = -1
+    smm_strategy = SimpleMarketMakerStrategy(
+        exchange=mock_exchange_smm, # The mock exchange instance
+        symbol='ETH/USD',
+        order_size=0.1,
+        price_levels=[90, 95, 100.01],
+        increment=10,
+        strategy_id=strategy_id_main
+    )
 
-    # Buy 1 unit at bid price 99.5 (assume market moved and our new bid is hit)
-    # For this test, let's assume the bid we placed (99.5) got hit.
-    strategy_test.execute_trade(trade_price=99.5, trade_size=1.0, is_buy_order=True)
-    print(f"After buying 1 unit at 99.5: PnL={strategy_test.pnl}, Inventory={strategy_test.inventory}") # PnL = 100.5 - 99.5 = 1, Inv = 0
+    # Initialize strategy with capital (mimics backtester action)
+    smm_strategy.run(initial_capital_allocation=initial_capital_for_strategy)
 
-    # Sell 0.5 unit at 101
-    strategy_test.execute_trade(trade_price=101, trade_size=0.5, is_buy_order=False)
-    print(f"After selling 0.5 unit at 101: PnL={strategy_test.pnl}, Inventory={strategy_test.inventory}") # PnL = 1 + 0.5*101 = 51.5, Inv = -0.5
+    main_logger.info(f"SMM Strategy ({smm_strategy.strategy_id}): Initial PnL: {smm_strategy.pnl:.2f}, Inv: {smm_strategy.inventory:.2f}")
+    main_logger.info(f"Max Entry Points: {smm_strategy.max_entry_points}")
+    main_logger.info(f"Active Buys: {smm_strategy.active_buy_orders}")
+    assert len(smm_strategy.active_buy_orders) == 3 # Based on price_levels and capital
 
-    # Buy 0.2 unit at 98
-    strategy_test.execute_trade(trade_price=98, trade_size=0.2, is_buy_order=True)
-    # PnL = 51.5 - (98 * 0.2) = 51.5 - 19.6 = 31.9
-    # Inv = -0.5 + 0.2 = -0.3
-    print(f"After buying 0.2 unit at 98: PnL={strategy_test.pnl:.2f}, Inventory={strategy_test.inventory:.2f}")
+    # Simulate a buy order fill (e.g., order at 95 for 0.1 ETH)
+    buy_order_id_at_95 = smm_strategy.active_buy_orders.get(95)
+    test_fee = 0.0095 # Example fee: 0.01% of 95 * 0.1
+    if buy_order_id_at_95:
+        main_logger.info(f"\n--- Simulating BUY fill for {buy_order_id_at_95} (price 95), Fee: {test_fee} ---")
+        mock_exchange_smm.simulate_fill(buy_order_id_at_95, 95, smm_strategy.order_size) # Mark as filled in mock
+        smm_strategy.handle_filled_order(buy_order_id_at_95, 95, smm_strategy.order_size, fee=test_fee) # Notify strategy
+
+        main_logger.info(f"SMM Strategy: PnL: {smm_strategy.pnl:.4f}, Inv: {smm_strategy.inventory:.2f}")
+        # PnL = -(95 * 0.1) - 0.0095 = -9.5 - 0.0095 = -9.5095
+        assert abs(smm_strategy.pnl - (-9.5095)) < 1e-9
+        assert abs(smm_strategy.inventory - 0.1) < 1e-9
+        assert 95 not in smm_strategy.active_buy_orders # Original removed
+        assert 105 in smm_strategy.active_sell_orders # New sell placed
+        assert 95 in smm_strategy.active_buy_orders   # New buy order at 95 should be placed by place_new_buy_order_if_needed
+    else:
+        main_logger.error("SMM Test: Could not find active buy order at 95 for fill simulation.")
+
+    # Simulate a sell order fill (the one placed at 105)
+    sell_order_id_at_105 = smm_strategy.active_sell_orders.get(105)
+    test_sell_fee = 0.0105 # Example fee: 0.01% of 105 * 0.1
+    if sell_order_id_at_105:
+        main_logger.info(f"\n--- Simulating SELL fill for {sell_order_id_at_105} (price 105), Fee: {test_sell_fee} ---")
+        mock_exchange_smm.simulate_fill(sell_order_id_at_105, 105, smm_strategy.order_size)
+        smm_strategy.handle_filled_order(sell_order_id_at_105, 105, smm_strategy.order_size, fee=test_sell_fee)
+
+        main_logger.info(f"SMM Strategy: PnL: {smm_strategy.pnl:.4f}, Inv: {smm_strategy.inventory:.2f}")
+        # Prev PnL = -9.5095. Sell PnL = (105 * 0.1) - 0.0105 = 10.5 - 0.0105 = 10.4895
+        # Total PnL = -9.5095 + 10.4895 = 0.98
+        assert abs(smm_strategy.pnl - 0.98) < 1e-9
+        assert abs(smm_strategy.inventory - 0.0) < 1e-9 # Inventory back to 0
+        assert 105 not in smm_strategy.active_sell_orders
+    else:
+        main_logger.error("SMM Test: Could not find active sell order at 105 for fill simulation.")
+
+    main_logger.info(f"\nSMM Strategy Final State: PnL: {smm_strategy.pnl:.4f}, Inv: {smm_strategy.inventory:.2f}")
+    main_logger.info(f"Active Buys: {smm_strategy.active_buy_orders}")
+    main_logger.info(f"Active Sells: {smm_strategy.active_sell_orders}")
+    main_logger.info(f"Total orders in mock exchange: {len(mock_exchange_smm.orders)}")
+    main_logger.info("SMM Strategy example finished.")
+
+    # TODO: Add __main__ test for MarketMakingStrategy with fees
+    # (Original __main__ for MarketMakingStrategy would go here if needed)
+```

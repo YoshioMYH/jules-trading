@@ -3,119 +3,111 @@ import argparse
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import json # For saving detailed results
+import logging # For better logging
 
 from src.backtester import Backtester
 from src.data_loader import load_trade_data
-from src.strategy import MarketMakingStrategy
-from src.utils import permute_trade_data
+from src.strategy import SimpleMarketMakerStrategy # MarketMakingStrategy removed
+from src.utils import permute_trade_data, DateTimeEncoder
+
+logger = logging.getLogger(__name__)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Market Making Strategy Backtester with Optimization")
+    parser = argparse.ArgumentParser(description="SimpleMarketMakerStrategy Backtester")
     parser.add_argument('--data-file', type=str, required=True, help='Path to the CSV trade data file.')
-    parser.add_argument('--order-size', type=float, required=True, help='Order size for the strategy.')
-    parser.add_argument('--spread-min-bps', type=float, required=True, help='Minimum spread in basis points for optimization.')
-    parser.add_argument('--spread-max-bps', type=float, required=True, help='Maximum spread in basis points for optimization.')
-    parser.add_argument('--spread-step-bps', type=float, required=True, help='Step size for spread in basis points during optimization.')
-    parser.add_argument('--output-plot-prefix', type=str, default='optimization_plot', help='Prefix for output plot filenames.')
+    parser.add_argument('--fee-bps', type=int, default=10, help='Trading fee in basis points (e.g., 10 for 0.1%)')
+    parser.add_argument('--output-prefix', type=str, default='smm_backtest_run', help='Prefix for output plot and results filenames.')
     parser.add_argument('--permute-data', action='store_true', help='If set, run backtest on data with shuffled prices.')
+
+    # SMM specific arguments (renamed for clarity as this is SMM only now)
+    parser.add_argument('--initial-capital', type=float, default=10000.0, help='Initial capital for SimpleMarketMakerStrategy.')
+    parser.add_argument('--order-size', type=float, default=0.1, help='Order size for SimpleMarketMakerStrategy.')
+    parser.add_argument('--price-levels', type=str, default="90,95,100,105,110", help='Comma-separated price levels for SMM buy orders (e.g., "90,95,100").')
+    parser.add_argument('--increment', type=float, default=10.0, help='Price increment for SMM sell orders.')
+    parser.add_argument('--symbol', type=str, default="TEST/USD", help="Trading symbol for the strategy.")
+    parser.add_argument('--strategy-id', type=str, default="SMM_MainRun", help="Identifier for the strategy instance.")
+
 
     args = parser.parse_args()
 
-    print(f"Loading data from: {args.data_file}")
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    logger.info(f"Loading data from: {args.data_file}")
     trade_df = load_trade_data(args.data_file)
 
     if trade_df.empty:
-        print(f"Error: No data loaded from {args.data_file}. Exiting.")
+        logger.error(f"Error: No data loaded from {args.data_file}. Exiting.")
         return
 
     if args.permute_data:
-        print("\nINFO: Running backtest on PERMUTED data (shuffled 'price' column).\n")
+        logger.info("\nINFO: Running backtest on PERMUTED data (shuffled 'price' column).\n")
         trade_df = permute_trade_data(trade_df, column_to_shuffle='price')
-        if trade_df.empty: # Should not happen with current permute_trade_data logic unless original df was empty
-            print("Error: Permutation resulted in an empty DataFrame. Exiting.")
+        if trade_df.empty:
+            logger.error("Error: Permutation resulted in an empty DataFrame. Exiting.")
             return
 
+    logger.info("Running SimpleMarketMakerStrategy...")
+    smm_price_levels = [float(p.strip()) for p in args.price_levels.split(',')]
+    logger.info(f"SMM Params: Initial Capital: {args.initial_capital}, Order Size: {args.order_size}, "
+                f"Price Levels: {smm_price_levels}, Increment: {args.increment}, Fee: {args.fee_bps} bps, "
+                f"Symbol: {args.symbol}, Strategy ID: {args.strategy_id}")
 
-    spread_values_bps = np.arange(args.spread_min_bps, args.spread_max_bps + args.spread_step_bps, args.spread_step_bps)
+    strategy = SimpleMarketMakerStrategy(
+        exchange=None, # Backtester will set this
+        symbol=args.symbol,
+        order_size=args.order_size,
+        price_levels=smm_price_levels,
+        increment=args.increment,
+        strategy_id=args.strategy_id
+    )
+    backtester = Backtester(
+        data=trade_df.copy(),
+        strategy=strategy,
+        fee_bps=args.fee_bps,
+        initial_capital=args.initial_capital
+    )
 
-    if len(spread_values_bps) == 0 or args.spread_step_bps <= 0:
-        print("Error: Spread range or step is invalid. Ensure spread_max_bps >= spread_min_bps and spread_step_bps > 0.")
-        return
+    backtester.run_backtest(data_file_path=args.data_file)
 
-    print(f"Optimizing for spread_bps from {args.spread_min_bps} to {args.spread_max_bps} with step {args.spread_step_bps}.")
-    print(f"Order size for all runs: {args.order_size}")
+    results = backtester.get_results()
+    summary = results['summary_stats']
 
-    all_results = []
+    logger.info(f"\n--- SMM Run Summary ---")
+    logger.info(f"Parameters: {json.dumps(results['parameters'], indent=2)}")
+    logger.info(f"PnL: {summary['final_pnl']:.4f}, Trades: {summary['total_trades']}, Final Inventory: {summary['final_inventory']:.4f}")
 
-    for current_spread_bps in spread_values_bps:
-        print(f"\nRunning backtest for spread_bps: {current_spread_bps:.2f}...")
+    detailed_results_filename = f"{args.output_prefix}_details.json"
+    try:
+        with open(detailed_results_filename, 'w') as f:
+            json.dump(results, f, indent=4, cls=DateTimeEncoder)
+        logger.info(f"Detailed SMM results saved to {detailed_results_filename}")
+    except Exception as e:
+        logger.error(f"Error saving detailed SMM results: {e}")
 
-        # Re-initialize strategy and backtester for each run to ensure no state leakage
-        strategy = MarketMakingStrategy(quote_size=args.order_size)
-        backtester = Backtester(data=trade_df.copy(), strategy=strategy) # Use a copy of df if it's modified by backtester (it shouldn't be)
-
-        backtester.run_backtest(spread_bps=current_spread_bps, order_size=args.order_size)
-
-        final_pnl = strategy.pnl
-        num_trades = len(backtester.get_results())
-        final_inventory = strategy.inventory
-
-        all_results.append({
-            'spread_bps': current_spread_bps,
-            'final_pnl': final_pnl,
-            'num_trades': num_trades,
-            'final_inventory': final_inventory
-        })
-        print(f"Spread: {current_spread_bps:.2f} bps => PnL: {final_pnl:.4f}, Trades: {num_trades}, Inventory: {final_inventory:.4f}")
-
-    print("\n--- Optimization Summary ---")
-    if not all_results:
-        print("No backtest runs were completed.")
-        return
-
-    results_df = pd.DataFrame(all_results)
-    print(results_df.to_string(index=False))
-
-    best_run = results_df.loc[results_df['final_pnl'].idxmax()]
-
-    print("\n--- Best Parameters ---")
-    print(f"Best Spread: {best_run['spread_bps']:.2f} bps")
-    print(f"Corresponding PnL: {best_run['final_pnl']:.4f}")
-    print(f"Corresponding Trades: {best_run['num_trades']}")
-    print(f"Corresponding Final Inventory: {best_run['final_inventory']:.4f}")
-
-    # Generate Summary Plots
-    if not results_df.empty:
+    # Plotting PnL over time for SMM run
+    smm_trades_log = results.get('trades', [])
+    if smm_trades_log:
         try:
-            # Plot PnL vs. Spread
-            plt.figure(figsize=(10, 6))
-            plt.plot(results_df['spread_bps'], results_df['final_pnl'], marker='o', linestyle='-')
-            plt.title('Final PnL vs. Spread (bps)')
-            plt.xlabel('Spread (bps)')
-            plt.ylabel('Final PnL')
+            plt.figure(figsize=(12, 7))
+            smm_pnl_over_time = [trade['pnl'] for trade in smm_trades_log]
+            smm_trade_times = pd.to_datetime([trade['time'] for trade in smm_trades_log])
+            plt.plot(smm_trade_times, smm_pnl_over_time, marker='o', linestyle='-', markersize=4)
+            plt.title(f'SMM PnL Over Time - Fee: {args.fee_bps}bps')
+            plt.xlabel('Time of Trade')
+            plt.ylabel('Cumulative PnL')
             plt.grid(True)
-            pnl_plot_filename = f"{args.output_plot_prefix}_pnl_vs_spread.png"
-            plt.savefig(pnl_plot_filename)
-            print(f"\nPnL vs. Spread plot saved to: {pnl_plot_filename}")
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            smm_pnl_plot_filename = f"{args.output_prefix}_pnl_over_time.png"
+            plt.savefig(smm_pnl_plot_filename)
+            logger.info(f"\nSMM PnL over time plot saved to: {smm_pnl_plot_filename}")
             plt.close()
-
-            # Plot Number of Trades vs. Spread
-            plt.figure(figsize=(10, 6))
-            plt.plot(results_df['spread_bps'], results_df['num_trades'], marker='o', linestyle='-')
-            plt.title('Number of Trades vs. Spread (bps)')
-            plt.xlabel('Spread (bps)')
-            plt.ylabel('Number of Trades')
-            plt.grid(True)
-            trades_plot_filename = f"{args.output_plot_prefix}_trades_vs_spread.png"
-            plt.savefig(trades_plot_filename)
-            print(f"Trades vs. Spread plot saved to: {trades_plot_filename}")
-            plt.close()
-
         except Exception as e:
-            print(f"Error generating summary plots: {e}")
+            logger.error(f"Error generating SMM PnL plot: {e}")
     else:
-        print("No results to plot.")
+        logger.info("No trades in SMM run to plot PnL over time.")
 
 if __name__ == '__main__':
     main()
