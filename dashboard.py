@@ -183,8 +183,8 @@ if data:
                             min_value=0,
                             max_value=max(0, market_total_points - market_visible_points_val),
                             value=0,
-                            step=market_visible_points_val, # Step by the number of visible points
-                            key="market_start_point" # Unique key
+                            step=market_visible_points_val,  # Step by the number of visible points
+                            key="market_start_point"  # Unique key
                         )
                     else:
                         market_start_point = 0
@@ -192,12 +192,11 @@ if data:
                     # Filter tick_df based on sliders first
                     tick_df_filtered = tick_df.iloc[market_start_point : market_start_point + market_visible_points]
 
-                    # Prepare data for Plotly by melting
-                    # Reset index to bring 'time' back as a column if it was set as index
-                    # However, tick_df['time'] is already a column, so no need to reset_index if we directly use tick_df_filtered
+                    # Prepare data for Plotly by melting the full tick_df (after initial column availability checks)
+                    # 'time' column is already pd.to_datetime from the initial load of tick_df
 
                     # Ensure 'time' is datetime
-                    tick_df_filtered['time'] = pd.to_datetime(tick_df_filtered['time'])
+                    tick_df_filtered.loc[:, 'time'] = pd.to_datetime(tick_df_filtered.loc[:, 'time'])
 
                     # Select relevant columns for melting
                     columns_to_melt = ['time'] + [col for col in plot_columns if col in tick_df_filtered.columns]
@@ -205,25 +204,26 @@ if data:
                     # Ensure plot_columns exist in tick_df_filtered before melting
                     final_plot_columns = [col for col in plot_columns if col in tick_df_filtered.columns]
 
-                    if len(final_plot_columns) > 0 : # only proceed if there are columns to plot
+                    if len(final_plot_columns) > 0:  # only proceed if there are columns to plot
                         melted_df = tick_df_filtered[['time'] + final_plot_columns].melt(
                             id_vars=['time'],
-                            value_vars=final_plot_columns,
+                            value_vars=final_plot_columns_full,
                             var_name='variable',
                             value_name='value'
                         )
+                        melted_df_full['value'] = pd.to_numeric(melted_df_full['value'], errors='coerce')
 
                         # Convert 'value' to numeric, coercing errors for potentially mixed types if quotes are missing
                         melted_df['value'] = pd.to_numeric(melted_df['value'], errors='coerce')
 
                         if not melted_df.empty:
-                            fig_market = px.line(melted_df, x='time', y='value', color='variable', title="Market Price and Quotes")
+                            fig_market = px.line(melted_df, x='time', y='value', color='variable',
+                                                 title="Market Price and Quotes")
                             st.plotly_chart(fig_market, use_container_width=True)
                         else:
-                            st.info("No data to display for the selected market data range after filtering/melting.")
+                            st.info("No data to display for market prices and quotes after processing.")
                     else:
-                        st.warning("Selected columns for market plot are not available in the filtered data.")
-
+                        st.warning("Selected columns for market plot are not available in the data.")
                 else:
                     st.info("No Market data points to plot.")
             else:
@@ -234,16 +234,3 @@ if data:
         st.info("No tick data to plot market prices and quotes.")
 else:
     st.info("No data to display. Run a backtest to generate `backtest_results.json`.")
-
-# Add a note about running the backtester
-st.sidebar.header("Instructions")
-st.sidebar.info(
-    "1. Ensure you have run a backtest using `python src/backtester.py --data-file data/your_trade_data.csv` "
-    " (replace `your_trade_data.csv` with your actual data file, e.g., `sample_trades.csv`). "
-    "This will generate the `backtest_results.json` file."
-    "\n\n"
-    "2. This dashboard will then visualize the contents of `backtest_results.json`."
-    "\n\n"
-    "3. To run this dashboard, open your terminal in the project root directory and execute:\n"
-    "`streamlit run dashboard.py`"
-)
