@@ -5,6 +5,11 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from bokeh.core.enums import TooltipFieldFormatter
+from bokeh.models import ColumnDataSource, HoverTool, DatetimeTickFormatter
+from bokeh.palettes import Category10
+from bokeh.plotting import figure
+from streamlit_bokeh import streamlit_bokeh
 
 from src.data_loader import load_trade_data
 
@@ -66,7 +71,7 @@ def load_data(file_path):
         return None, None
 
 
-def prepare_ohlc_data(market_data_df: pd.DataFrame, resample_freq: str = '1T') -> pd.DataFrame:
+def prepare_ohlc_data(market_data_df: pd.DataFrame, resample_freq: str = '1min') -> pd.DataFrame:
     if market_data_df is None or market_data_df.empty:
         st.info("Market data is empty, cannot prepare OHLC data.")
         return pd.DataFrame()
@@ -92,8 +97,7 @@ def prepare_ohlc_data(market_data_df: pd.DataFrame, resample_freq: str = '1T') -
         return pd.DataFrame()
 
 
-def plot_ohlc_with_trades(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame = None, visible_candles: int = 50,
-                          start_index: int = 0):
+def plot_ohlc_with_trades(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame = None, visible_candles: int = 50):
     required_cols = ['time', 'open', 'high', 'low', 'close']
     if ohlc_df.empty or not all(col in ohlc_df.columns for col in required_cols):
         st.info("Not enough data or incorrect format for OHLC chart.")
@@ -111,13 +115,7 @@ def plot_ohlc_with_trades(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame = None,
         st.error("OHLC data is missing 'time' column or is empty before time conversion.")
         return
 
-    if start_index < 0:
-        start_index = 0
-    if visible_candles <= 0:
-        visible_candles = 50  # Default to 50 if invalid
-
-    end_index = start_index + visible_candles
-    ohlc_display_df = ohlc_df.iloc[start_index:end_index]
+    ohlc_display_df = ohlc_df.iloc[0:visible_candles]
 
     if ohlc_display_df.empty:
         st.info("No OHLC data in the selected range.")
@@ -171,13 +169,115 @@ def plot_ohlc_with_trades(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame = None,
         else:  # 'time' column missing in trades_df
             st.warning("Trades data is missing 'time' column, cannot plot trades on OHLC.")
 
-    layout = go.Layout(
-        title='OHLC Chart with Trades',
-        xaxis_title='Time', yaxis_title='Price',
-        xaxis_rangeslider_visible=False  # Use Streamlit slider for navigation
+    # Bokeh plot
+    source = ColumnDataSource(ohlc_display_df)
+
+    # Determine candle width (e.g., 80% of the median time difference)
+    # Ensure 'time' is sorted for correct diff calculation
+    ohlc_display_df = ohlc_display_df.sort_values(by='time')
+    time_diffs = ohlc_display_df['time'].diff().dt.total_seconds() * 1000  # milliseconds
+    # Use a default width if only one candle or time_diffs is empty/NaN
+    candle_width_ms = time_diffs.median() * 0.8 if len(time_diffs) > 1 and not time_diffs.iloc[
+                                                                               1:].isnull().all() else 86400000 * 0.8  # Default to 80% of a day
+
+    # Ensure candle_width_ms is a float and not NaN, otherwise Bokeh might error
+    if pd.isna(candle_width_ms):
+        candle_width_ms = 86400000 * 0.8  # Fallback default width
+
+    p = figure(
+        x_axis_type="datetime",
+        tools="xpan,xwheel_zoom,ywheel_zoom,reset,save,box_zoom",  # Added box_zoom for better zoom control
+        active_drag="xpan",
+        active_scroll="xwheel_zoom",
+        title=f"OHLC Chart (Candle width: {candle_width_ms:.2f}ms)"  # Debug title
     )
-    fig = go.Figure(data=fig_data, layout=layout)
-    st.plotly_chart(fig, use_container_width=True)
+    p.xaxis.formatter = DatetimeTickFormatter(
+        hours="%H:%M",
+        days="%d %b",
+        months="%b %Y",
+        years="%Y",
+    )
+    p.xaxis.major_label_orientation = 0.8  # Radians, approx 45 degrees
+
+    # Candlestick colors
+    inc = ohlc_display_df.close > ohlc_display_df.open
+    dec = ohlc_display_df.open > ohlc_display_df.close
+    equal = ohlc_display_df.open == ohlc_display_df.close  # Handle cases where open == close
+
+    # Wicks
+    p.segment(ohlc_display_df.time, ohlc_display_df.high, ohlc_display_df.time, ohlc_display_df.low, color="black")
+
+    # Candle bodies
+    # Green for increasing
+    p.vbar(ohlc_display_df.time[inc], candle_width_ms, ohlc_display_df.open[inc], ohlc_display_df.close[inc],
+           fill_color=Category10[3][0], line_color="black")
+    # Red for decreasing
+    p.vbar(ohlc_display_df.time[dec], candle_width_ms, ohlc_display_df.open[dec], ohlc_display_df.close[dec],
+           fill_color=Category10[3][1], line_color="black")
+    # Blue or Gray for equal open/close (optional, could also use previous close to determine color)
+    p.vbar(ohlc_display_df.time[equal], candle_width_ms, ohlc_display_df.open[equal], ohlc_display_df.close[equal],
+           fill_color=Category10[3][2], line_color="black")
+
+    hover_tooltips = [
+        ("Time", "@time{%F %T}"),
+        ("Open", "@open{0,0.00}"),
+        ("High", "@high{0,0.00}"),
+        ("Low", "@low{0,0.00}"),
+        ("Close", "@close{0,0.00}")
+    ]
+    hover_formatters = {
+        '@time': TooltipFieldFormatter.datetime,
+    }
+
+    if trades_df is not None and not trades_df.empty:
+        if 'time' in trades_df.columns and 'price' in trades_df.columns and 'type' in trades_df.columns:
+            # Ensure 'time' column is datetime for trades as well
+            if not pd.api.types.is_datetime64_any_dtype(trades_df['time']):
+                try:
+                    trades_df['time'] = pd.to_datetime(trades_df['time'])
+                except Exception as e:
+                    st.error(f"Error converting 'time' in trades_df for Bokeh plot: {e}")
+                    trades_df = pd.DataFrame()  # Empty to skip
+
+            if not trades_df.empty:
+                min_time_ohlc = ohlc_display_df['time'].min()
+                max_time_ohlc = ohlc_display_df['time'].max()
+                relevant_trades_bokeh = trades_df[
+                    (trades_df['time'] >= min_time_ohlc) & (trades_df['time'] <= max_time_ohlc)
+                    ]
+
+                if not relevant_trades_bokeh.empty:
+                    buy_trades_bokeh = relevant_trades_bokeh[relevant_trades_bokeh['type'] == 'buy']
+                    sell_trades_bokeh = relevant_trades_bokeh[relevant_trades_bokeh['type'] == 'sell']
+
+                    if not buy_trades_bokeh.empty:
+                        buy_source = ColumnDataSource(buy_trades_bokeh)
+                        buy_markers = p.scatter(
+                            x='time', y='price', source=buy_source,
+                            marker='triangle', size=10, color=Category10[4][1], legend_label='Buy Trades'
+                            # Brighter green
+                        )
+                        # Add separate hover for buys if needed, or ensure main hover tool catches them
+                        # For simplicity, the main hover tool might not show trade-specific info unless configured
+
+                    if not sell_trades_bokeh.empty:
+                        sell_source = ColumnDataSource(sell_trades_bokeh)
+                        sell_markers = p.scatter(
+                            x='time', y='price', source=sell_source,
+                            marker='inverted_triangle', size=10, color=Category10[4][0], legend_label='Sell Trades'
+                            # Brighter red
+                        )
+        else:
+            st.warning("Trades data is missing required columns ('time', 'price', 'type') for Bokeh plot.")
+
+    # Add a generic hover tool for OHLC data (can be customized further)
+    # Tooltip for trades can be added by creating separate renderers and hover tools for them if needed
+    p.add_tools(HoverTool(tooltips=hover_tooltips, formatters=hover_formatters, mode='vline'))
+
+    p.legend.location = "top_left"
+    p.legend.click_policy = "hide"  # "mute" also an option
+
+    streamlit_bokeh(p, use_container_width=True)
 
 
 backtest_data, market_data = load_data(RESULTS_FILE)
@@ -221,7 +321,7 @@ if backtest_data:
             pnl_df = pnl_df.sort_values(by='time')
             st.subheader("PnL Over Time")
 
-            # Sliders for PnL chart
+            # Number input for PnL chart
             total_points = len(pnl_df)
             if total_points > 0:  # Ensure there's data before creating controls
                 pnl_visible_points = st.number_input(
@@ -234,7 +334,6 @@ if backtest_data:
                 )
                 # Ensure pnl_visible_points is an int for calculations
                 pnl_visible_points_val = int(pnl_visible_points)
-                # pnl_start_point slider and associated filtering logic removed.
 
                 # Plotly chart using the full pnl_df
                 if not pnl_df.empty:
@@ -278,7 +377,6 @@ if backtest_data:
                 )
                 # Ensure inv_visible_points is an int for calculations
                 inv_visible_points_val = int(inv_visible_points)
-                # inv_start_point slider and associated filtering logic removed.
 
                 # Plotly chart using the full inventory_df
                 if not inventory_df.empty:
@@ -306,9 +404,10 @@ if market_data is not None and not market_data.empty:
     st.success(f"Successfully loaded market data from {backtest_data['parameters']['market_data_path']}")
 
     # Resample frequency selection
-    freq_options = {'1 Second': '1S', '1 Minute': '1T', '30 Minutes': '30T', '1 Hour': '1H', '12 Hours': '12H',
-                    '1 Day': '1D', '1 Week': '1W', '1 Month': '1M'}
-    selected_freq_label = st.selectbox("OHLC Resample Frequency", options=list(freq_options.keys()), index=0)
+    freq_options = {'1 Second': '1s', '10 Second': '10s', '1 Minute': '1min', '30 Minutes': '30min', '1 Hour': '1h',
+                    '12 Hours': '12H',
+                    '1 Day': '1D', '1 Week': '1W', '1 Month': '1ME'}
+    selected_freq_label = st.selectbox("OHLC Resample Frequency", options=list(freq_options.keys()), index=2)
     resample_freq_code = freq_options[selected_freq_label]
 
     ohlc_df = prepare_ohlc_data(market_data, resample_freq_code)
@@ -318,32 +417,17 @@ if market_data is not None and not market_data.empty:
 
         total_candles = len(ohlc_df)
 
-        # Sliders for OHLC chart view
-        col1_ohlc, col2_ohlc = st.columns(2)
-        with col1_ohlc:
-            visible_candles_ohlc = st.number_input(
-                "Number of OHLC candles to display",
-                min_value=10,
-                max_value=max(10, total_candles),
-                value=min(50, total_candles),  # Default to 50 or total_candles if less
-                step=10,
-                key="ohlc_visible_candles"
-            )
-        with col2_ohlc:
-            # Ensure max_value for slider is non-negative
-            max_slider_val = max(0, total_candles - int(visible_candles_ohlc))
-            start_index_ohlc = st.slider(
-                "OHLC starting candle index",
-                min_value=0,
-                max_value=max_slider_val,
-                value=0,
-                step=1,  # Or some other reasonable step
-                key="ohlc_start_index"
-            )
+        visible_candles_ohlc = st.number_input(
+            "Number of OHLC candles to display",
+            min_value=1,
+            max_value=total_candles,
+            value=total_candles,
+            step=1,
+            key="ohlc_visible_candles"
+        )
 
         # Ensure types are correct for the function
         visible_candles_ohlc = int(visible_candles_ohlc)
-        start_index_ohlc = int(start_index_ohlc)
 
         # Get the trades_df if available
         raw_trades_list = backtest_data.get('trades')
@@ -359,7 +443,7 @@ if market_data is not None and not market_data.empty:
                 st.warning("Trades data loaded for OHLC plot is missing 'time' column.")
                 current_trades_df = None  # Invalidate if 'time' column is missing
 
-        plot_ohlc_with_trades(ohlc_df, current_trades_df, visible_candles_ohlc, start_index_ohlc)
+        plot_ohlc_with_trades(ohlc_df, current_trades_df, visible_candles_ohlc)
 
     else:
         st.info("OHLC data could not be prepared. Check warnings above.")

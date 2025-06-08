@@ -5,3 +5,5 @@ pytest
 tqdm
 streamlit
 plotly
+streamlit-bokeh
+bokeh
