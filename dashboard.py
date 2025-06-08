@@ -280,6 +280,69 @@ def plot_ohlc_with_trades(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame = None,
     streamlit_bokeh(p, use_container_width=True)
 
 
+def plot_line_chart_bokeh(df: pd.DataFrame, x_column: str, y_column: str, title: str, visible_points: int):
+    """Plots a line chart using Bokeh."""
+    if df is None or df.empty:
+        st.info(f"No data available to plot {title}.")
+        return
+
+    if x_column not in df.columns or y_column not in df.columns:
+        st.warning(f"Data for {title} is missing required columns: '{x_column}' or '{y_column}'.")
+        return
+
+    # Ensure x_column is datetime
+    if not pd.api.types.is_datetime64_any_dtype(df[x_column]):
+        try:
+            df[x_column] = pd.to_datetime(df[x_column])
+        except Exception as e:
+            st.error(f"Error converting '{x_column}' to datetime for {title}: {e}")
+            return
+
+    # Slice the DataFrame
+    if visible_points < len(df):
+        plot_df = df.iloc[-visible_points:]
+    else:
+        plot_df = df
+
+    if plot_df.empty:
+        st.info(f"No data in the selected range for {title}.")
+        return
+
+    source = ColumnDataSource(plot_df)
+
+    p = figure(
+        x_axis_type="datetime",
+        title=title,
+        tools="xpan,xwheel_zoom,ywheel_zoom,reset,save,hover",
+        active_drag="xpan",
+        active_scroll="xwheel_zoom"
+    )
+
+    p.xaxis.formatter = DatetimeTickFormatter(
+        hours="%H:%M",
+        days="%d %b",
+        months="%b %Y",
+        years="%Y"
+    )
+    p.xaxis.major_label_orientation = 0.8  # Radians, approx 45 degrees
+
+    p.line(x=x_column, y=y_column, source=source, line_width=2)
+
+    hover_tool = HoverTool(
+        tooltips=[
+            ("Time", f"@{x_column}{{%F %T}}"),
+            (title.split(" ")[0], f"@{y_column}{{0,0.00}}")
+        ],
+        formatters={
+            f"@{x_column}": "datetime"
+        },
+        mode='vline'  # Show tooltip for all points on the same x-coordinate
+    )
+    p.add_tools(hover_tool)
+
+    streamlit_bokeh(p, use_container_width=True)
+
+
 backtest_data, market_data = load_data(RESULTS_FILE)
 
 # 1. Display Parameters and Summary Statistics
@@ -335,18 +398,9 @@ if backtest_data:
                 # Ensure pnl_visible_points is an int for calculations
                 pnl_visible_points_val = int(pnl_visible_points)
 
-                # Plotly chart using the full pnl_df
+                # Bokeh chart using the potentially sliced pnl_df
                 if not pnl_df.empty:
-                    fig = px.line(pnl_df, x='time', y='pnl', title="PnL Over Time")
-                    if pnl_visible_points_val > 0 and len(pnl_df) > 1:
-                        end_idx = min(pnl_visible_points_val - 1, len(pnl_df) - 1)  # -1 because iloc is 0-indexed
-                        if end_idx > 0:  # Ensure there's a valid range
-                            # Check if start and end time are different to avoid Plotly error/warning
-                            if pnl_df['time'].iloc[0] != pnl_df['time'].iloc[end_idx]:
-                                fig.update_layout(xaxis_range=[pnl_df['time'].iloc[0], pnl_df['time'].iloc[end_idx]])
-                            # If start and end time are the same (e.g. end_idx is 0 after -1, or all times are identical for the range)
-                            # Plotly will auto-range, which is acceptable.
-                    st.plotly_chart(fig, use_container_width=True)
+                    plot_line_chart_bokeh(pnl_df, 'time', 'pnl', "PnL Over Time", pnl_visible_points_val)
                 else:
                     st.info("No PnL data to display.")
             else:
@@ -378,16 +432,9 @@ if backtest_data:
                 # Ensure inv_visible_points is an int for calculations
                 inv_visible_points_val = int(inv_visible_points)
 
-                # Plotly chart using the full inventory_df
+                # Bokeh chart using the potentially sliced inventory_df
                 if not inventory_df.empty:
-                    fig_inv = px.line(inventory_df, x='time', y='inventory', title="Inventory Over Time")
-                    if inv_visible_points_val > 0 and len(inventory_df) > 1:
-                        end_idx = min(inv_visible_points_val - 1, len(inventory_df) - 1)
-                        if end_idx > 0:
-                            if inventory_df['time'].iloc[0] != inventory_df['time'].iloc[end_idx]:
-                                fig_inv.update_layout(
-                                    xaxis_range=[inventory_df['time'].iloc[0], inventory_df['time'].iloc[end_idx]])
-                    st.plotly_chart(fig_inv, use_container_width=True)
+                    plot_line_chart_bokeh(inventory_df, 'time', 'inventory', "Inventory Over Time", inv_visible_points_val)
                 else:
                     st.info("No Inventory data to display.")
             else:
