@@ -92,8 +92,7 @@ def prepare_ohlc_data(market_data_df: pd.DataFrame, resample_freq: str = '1T') -
         return pd.DataFrame()
 
 
-def plot_ohlc_with_trades(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame = None, visible_candles: int = 50,
-                          start_index: int = 0):
+def plot_ohlc_with_trades(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame = None, visible_candles: int = 50):
     required_cols = ['time', 'open', 'high', 'low', 'close']
     if ohlc_df.empty or not all(col in ohlc_df.columns for col in required_cols):
         st.info("Not enough data or incorrect format for OHLC chart.")
@@ -111,24 +110,19 @@ def plot_ohlc_with_trades(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame = None,
         st.error("OHLC data is missing 'time' column or is empty before time conversion.")
         return
 
-    if start_index < 0:
-        start_index = 0
-    if visible_candles <= 0:
-        visible_candles = 50  # Default to 50 if invalid
+    # Removed start_index and end_index logic
+    # ohlc_display_df is replaced by ohlc_df
 
-    end_index = start_index + visible_candles
-    ohlc_display_df = ohlc_df.iloc[start_index:end_index]
-
-    if ohlc_display_df.empty:
-        st.info("No OHLC data in the selected range.")
+    if ohlc_df.empty: # Check the main ohlc_df
+        st.info("No OHLC data to display.") # Adjusted message slightly
         return
 
     candlestick_trace = go.Candlestick(
-        x=ohlc_display_df['time'],
-        open=ohlc_display_df['open'],
-        high=ohlc_display_df['high'],
-        low=ohlc_display_df['low'],
-        close=ohlc_display_df['close'],
+        x=ohlc_df['time'], # Use ohlc_df
+        open=ohlc_df['open'], # Use ohlc_df
+        high=ohlc_df['high'], # Use ohlc_df
+        low=ohlc_df['low'], # Use ohlc_df
+        close=ohlc_df['close'], # Use ohlc_df
         name='OHLC'
     )
     fig_data = [candlestick_trace]
@@ -144,10 +138,10 @@ def plot_ohlc_with_trades(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame = None,
                     trades_df = pd.DataFrame()  # Make it empty to skip plotting trades
 
             # Proceed only if trades_df is still valid (not emptied by error handling) and has time
-            if not trades_df.empty and 'time' in trades_df.columns:
-                min_time = ohlc_display_df['time'].min()
-                max_time = ohlc_display_df['time'].max()
-                relevant_trades = trades_df[(trades_df['time'] >= min_time) & (trades_df['time'] <= max_time)]
+            if not trades_df.empty and 'time' in trades_df.columns and not ohlc_df.empty: # Also check ohlc_df not empty
+                min_time_ohlc = ohlc_df['time'].min() # Use ohlc_df for min time
+                max_time_ohlc = ohlc_df['time'].max() # Use ohlc_df for max time
+                relevant_trades = trades_df[(trades_df['time'] >= min_time_ohlc) & (trades_df['time'] <= max_time_ohlc)]
 
                 if not relevant_trades.empty:
                     buy_trades = relevant_trades[relevant_trades['type'] == 'buy']
@@ -174,9 +168,23 @@ def plot_ohlc_with_trades(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame = None,
     layout = go.Layout(
         title='OHLC Chart with Trades',
         xaxis_title='Time', yaxis_title='Price',
-        xaxis_rangeslider_visible=False  # Use Streamlit slider for navigation
+        xaxis_rangeslider_visible=True  # Changed from False
     )
     fig = go.Figure(data=fig_data, layout=layout)
+
+    # Set initial X-axis range based on visible_candles
+    if not ohlc_df.empty and visible_candles > 0 and len(ohlc_df) > 1:
+        start_time = ohlc_df['time'].iloc[0]
+        # Calculate end index, ensuring it's within bounds
+        end_idx = min(visible_candles - 1, len(ohlc_df) - 1)
+        end_time = ohlc_df['time'].iloc[end_idx]
+
+        # Only update layout if start_time and end_time are different to avoid issues
+        if start_time != end_time:
+            fig.update_layout(xaxis_range=[start_time, end_time])
+        # If start_time == end_time (e.g., only one data point in ohlc_df or visible_candles is 1),
+        # Plotly will auto-range, which is acceptable.
+
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -318,32 +326,19 @@ if market_data is not None and not market_data.empty:
 
         total_candles = len(ohlc_df)
 
-        # Sliders for OHLC chart view
-        col1_ohlc, col2_ohlc = st.columns(2)
-        with col1_ohlc:
-            visible_candles_ohlc = st.number_input(
-                "Number of OHLC candles to display",
-                min_value=10,
-                max_value=max(10, total_candles),
-                value=min(50, total_candles),  # Default to 50 or total_candles if less
-                step=10,
-                key="ohlc_visible_candles"
-            )
-        with col2_ohlc:
-            # Ensure max_value for slider is non-negative
-            max_slider_val = max(0, total_candles - int(visible_candles_ohlc))
-            start_index_ohlc = st.slider(
-                "OHLC starting candle index",
-                min_value=0,
-                max_value=max_slider_val,
-                value=0,
-                step=1,  # Or some other reasonable step
-                key="ohlc_start_index"
-            )
+        # Number input for visible candles (no longer in columns)
+        visible_candles_ohlc = st.number_input(
+            "Number of OHLC candles to display for initial view", # Updated label
+            min_value=10,
+            max_value=max(10, total_candles),
+            value=min(50, total_candles),  # Default to 50 or total_candles if less
+            step=10,
+            key="ohlc_visible_candles"
+        )
 
         # Ensure types are correct for the function
         visible_candles_ohlc = int(visible_candles_ohlc)
-        start_index_ohlc = int(start_index_ohlc)
+        # start_index_ohlc and its conversion to int are removed
 
         # Get the trades_df if available
         raw_trades_list = backtest_data.get('trades')
@@ -359,7 +354,17 @@ if market_data is not None and not market_data.empty:
                 st.warning("Trades data loaded for OHLC plot is missing 'time' column.")
                 current_trades_df = None  # Invalidate if 'time' column is missing
 
-        plot_ohlc_with_trades(ohlc_df, current_trades_df, visible_candles_ohlc, start_index_ohlc)
+        # Call plot_ohlc_with_trades without start_index_ohlc
+        # The actual slicing for display is now controlled by Plotly's own zoom/pan
+        # and the visible_candles_ohlc and start_index_ohlc sliders will be used
+        # to set the initial view range of the chart if desired, or removed if
+        # full chart view is default. For now, let's assume they might be used
+        # to set an initial viewport if that feature is kept or added later
+        # outside this specific function. The function itself now ignores start_index.
+        # The visible_candles parameter is also not used for slicing anymore.
+        # For now, we pass visible_candles_ohlc but it's not used inside plot_ohlc_with_trades
+        # for slicing. It could be used for layout hints if needed.
+        plot_ohlc_with_trades(ohlc_df, current_trades_df, visible_candles_ohlc)
 
     else:
         st.info("OHLC data could not be prepared. Check warnings above.")
