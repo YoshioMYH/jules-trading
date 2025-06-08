@@ -5,6 +5,9 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from bokeh.plotting import figure, show
+from bokeh.models import ColumnDataSource, HoverTool, DatetimeTickFormatter
+from bokeh.palettes import Category10
 
 from src.data_loader import load_trade_data
 
@@ -171,13 +174,114 @@ def plot_ohlc_with_trades(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame = None,
         else:  # 'time' column missing in trades_df
             st.warning("Trades data is missing 'time' column, cannot plot trades on OHLC.")
 
-    layout = go.Layout(
-        title='OHLC Chart with Trades',
-        xaxis_title='Time', yaxis_title='Price',
-        xaxis_rangeslider_visible=False  # Use Streamlit slider for navigation
+    # Bokeh plot
+    source = ColumnDataSource(ohlc_display_df)
+
+    # Determine candle width (e.g., 80% of the median time difference)
+    # Ensure 'time' is sorted for correct diff calculation
+    ohlc_display_df = ohlc_display_df.sort_values(by='time')
+    time_diffs = ohlc_display_df['time'].diff().dt.total_seconds() * 1000  # milliseconds
+    # Use a default width if only one candle or time_diffs is empty/NaN
+    candle_width_ms = time_diffs.median() * 0.8 if len(time_diffs) > 1 and not time_diffs.iloc[1:].isnull().all() else 86400000 * 0.8 # Default to 80% of a day
+
+    # Ensure candle_width_ms is a float and not NaN, otherwise Bokeh might error
+    if pd.isna(candle_width_ms):
+        candle_width_ms = 86400000 * 0.8 # Fallback default width
+
+    p = figure(
+        x_axis_type="datetime",
+        tools="xpan,xwheel_zoom,ywheel_zoom,reset,save,box_zoom", # Added box_zoom for better zoom control
+        active_drag="xpan",
+        active_scroll="xwheel_zoom",
+        title=f"OHLC Chart (Candle width: {candle_width_ms:.2f}ms)" # Debug title
     )
-    fig = go.Figure(data=fig_data, layout=layout)
-    st.plotly_chart(fig, use_container_width=True)
+    p.xaxis.formatter = DatetimeTickFormatter(
+        hours=["%H:%M"],
+        days=["%d %b"],
+        months=["%b %Y"],
+        years=["%Y"],
+    )
+    p.xaxis.major_label_orientation = 0.8 # Radians, approx 45 degrees
+
+    # Candlestick colors
+    inc = ohlc_display_df.close > ohlc_display_df.open
+    dec = ohlc_display_df.open > ohlc_display_df.close
+    equal = ohlc_display_df.open == ohlc_display_df.close # Handle cases where open == close
+
+    # Wicks
+    p.segment(ohlc_display_df.time, ohlc_display_df.high, ohlc_display_df.time, ohlc_display_df.low, color="black")
+
+    # Candle bodies
+    # Green for increasing
+    p.vbar(ohlc_display_df.time[inc], candle_width_ms, ohlc_display_df.open[inc], ohlc_display_df.close[inc],
+           fill_color=Category10[3][0], line_color="black")
+    # Red for decreasing
+    p.vbar(ohlc_display_df.time[dec], candle_width_ms, ohlc_display_df.open[dec], ohlc_display_df.close[dec],
+           fill_color=Category10[3][1], line_color="black")
+    # Blue or Gray for equal open/close (optional, could also use previous close to determine color)
+    p.vbar(ohlc_display_df.time[equal], candle_width_ms, ohlc_display_df.open[equal], ohlc_display_df.close[equal],
+           fill_color=Category10[3][2], line_color="black")
+
+
+    hover_tooltips = [
+        ("Time", "@time{%F %T}"),
+        ("Open", "@open{0,0.00}"),
+        ("High", "@high{0,0.00}"),
+        ("Low", "@low{0,0.00}"),
+        ("Close", "@close{0,0.00}")
+    ]
+    hover_formatters = {
+        '@time': 'datetime',
+    }
+
+    if trades_df is not None and not trades_df.empty:
+        if 'time' in trades_df.columns and 'price' in trades_df.columns and 'type' in trades_df.columns:
+            # Ensure 'time' column is datetime for trades as well
+            if not pd.api.types.is_datetime64_any_dtype(trades_df['time']):
+                try:
+                    trades_df['time'] = pd.to_datetime(trades_df['time'])
+                except Exception as e:
+                    st.error(f"Error converting 'time' in trades_df for Bokeh plot: {e}")
+                    trades_df = pd.DataFrame() # Empty to skip
+
+            if not trades_df.empty:
+                min_time_ohlc = ohlc_display_df['time'].min()
+                max_time_ohlc = ohlc_display_df['time'].max()
+                relevant_trades_bokeh = trades_df[
+                    (trades_df['time'] >= min_time_ohlc) & (trades_df['time'] <= max_time_ohlc)
+                ]
+
+                if not relevant_trades_bokeh.empty:
+                    buy_trades_bokeh = relevant_trades_bokeh[relevant_trades_bokeh['type'] == 'buy']
+                    sell_trades_bokeh = relevant_trades_bokeh[relevant_trades_bokeh['type'] == 'sell']
+
+                    if not buy_trades_bokeh.empty:
+                        buy_source = ColumnDataSource(buy_trades_bokeh)
+                        buy_markers = p.scatter(
+                            x='time', y='price', source=buy_source,
+                            marker='triangle', size=10, color=Category10[4][1], legend_label='Buy Trades' # Brighter green
+                        )
+                        # Add separate hover for buys if needed, or ensure main hover tool catches them
+                        # For simplicity, the main hover tool might not show trade-specific info unless configured
+
+                    if not sell_trades_bokeh.empty:
+                        sell_source = ColumnDataSource(sell_trades_bokeh)
+                        sell_markers = p.scatter(
+                            x='time', y='price', source=sell_source,
+                            marker='inverted_triangle', size=10, color=Category10[4][0], legend_label='Sell Trades' # Brighter red
+                        )
+        else:
+            st.warning("Trades data is missing required columns ('time', 'price', 'type') for Bokeh plot.")
+
+
+    # Add a generic hover tool for OHLC data (can be customized further)
+    # Tooltip for trades can be added by creating separate renderers and hover tools for them if needed
+    p.add_tools(HoverTool(tooltips=hover_tooltips, formatters=hover_formatters, mode='vline'))
+
+    p.legend.location = "top_left"
+    p.legend.click_policy = "hide" # "mute" also an option
+
+    st.bokeh_chart(p, use_container_width=True)
 
 
 backtest_data, market_data = load_data(RESULTS_FILE)
