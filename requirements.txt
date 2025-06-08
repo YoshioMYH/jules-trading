@@ -4,3 +4,4 @@ numpy
 pytest
 tqdm
 streamlit
+plotly
