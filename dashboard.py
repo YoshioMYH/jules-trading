@@ -168,7 +168,11 @@ def plot_ohlc_with_trades(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame = None,
     layout = go.Layout(
         title='OHLC Chart with Trades',
         xaxis_title='Time', yaxis_title='Price',
-        xaxis_rangeslider_visible=True  # Changed from False
+        xaxis_rangeslider_visible=True,
+        yaxis=dict(
+            autorange=True,
+            fixedrange=False  # Ensure fixedrange is False for y-axis too
+        )
     )
     fig = go.Figure(data=fig_data, layout=layout)
 
