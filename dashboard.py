@@ -2,7 +2,6 @@ import json
 import os
 
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from bokeh.core.enums import TooltipFieldFormatter
@@ -170,7 +169,7 @@ def plot_ohlc_with_trades(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame = None,
             st.warning("Trades data is missing 'time' column, cannot plot trades on OHLC.")
 
     # Bokeh plot
-    source = ColumnDataSource(ohlc_display_df)
+    # source = ColumnDataSource(ohlc_display_df)
 
     # Determine candle width (e.g., 80% of the median time difference)
     # Ensure 'time' is sorted for correct diff calculation
@@ -252,7 +251,7 @@ def plot_ohlc_with_trades(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame = None,
 
                     if not buy_trades_bokeh.empty:
                         buy_source = ColumnDataSource(buy_trades_bokeh)
-                        buy_markers = p.scatter(
+                        p.scatter(
                             x='time', y='price', source=buy_source,
                             marker='triangle', size=10, color=Category10[4][1], legend_label='Buy Trades'
                             # Brighter green
@@ -262,7 +261,7 @@ def plot_ohlc_with_trades(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame = None,
 
                     if not sell_trades_bokeh.empty:
                         sell_source = ColumnDataSource(sell_trades_bokeh)
-                        sell_markers = p.scatter(
+                        p.scatter(
                             x='time', y='price', source=sell_source,
                             marker='inverted_triangle', size=10, color=Category10[4][0], legend_label='Sell Trades'
                             # Brighter red
