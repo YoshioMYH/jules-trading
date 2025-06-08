@@ -29,8 +29,9 @@ class Backtester:
         self.tick_data_log = []
         self.current_spread_bps: int | None = None
         self.current_order_size: float | None = None
+        self.data_file_path = None
 
-    def run_backtest(self, spread_bps: int, order_size: float):
+    def run_backtest(self, spread_bps: int, order_size: float, data_file_path: str = None):
         """
         Runs the backtest simulation.
 
@@ -39,9 +40,11 @@ class Backtester:
         Args:
             spread_bps: The spread in basis points for the strategy to use.
             order_size: The size of orders the strategy should place.
+            data_file_path: The path to the market data file.
         """
         self.current_spread_bps = spread_bps
         self.current_order_size = order_size
+        self.data_file_path = data_file_path
         self.strategy.quote_size = order_size # Set the order size for the strategy
         self.trades_log = [] # Reset log for new backtest run
         self.tick_data_log = [] # Reset tick data log for new backtest run
@@ -137,6 +140,7 @@ class Backtester:
             'parameters': {
                 'spread_bps': self.current_spread_bps,
                 'order_size': self.current_order_size,
+                'market_data_path': self.data_file_path,
             },
             'trades': self.trades_log,
             'tick_data': self.tick_data_log,
@@ -178,7 +182,7 @@ if __name__ == '__main__':
         test_order_size = 0.01 # Strategy will trade 0.01 units of base asset per trade
 
         print(f"\nRunning backtest with spread_bps={test_spread_bps} and order_size={test_order_size}...")
-        backtester_instance.run_backtest(spread_bps=test_spread_bps, order_size=test_order_size)
+        backtester_instance.run_backtest(spread_bps=test_spread_bps, order_size=test_order_size, data_file_path=data_file)
 
         # 5. Get and print results
         results = backtester_instance.get_results()
