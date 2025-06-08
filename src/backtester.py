@@ -5,7 +5,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from src.data_loader import load_trade_data  # For example usage
-from src.strategy import MarketMakingStrategy
+from src.grid_strategy import GridTradingStrategy
 from src.utils import DateTimeEncoder # Added import
 
 
@@ -14,7 +14,7 @@ class Backtester:
     Simulates a market making strategy against historical trade data.
     """
 
-    def __init__(self, data: pd.DataFrame, strategy: MarketMakingStrategy):
+    def __init__(self, data: pd.DataFrame, strategy: GridTradingStrategy):
         """
         Initializes the Backtester.
 
@@ -169,9 +169,9 @@ if __name__ == '__main__':
     else:
         print(f"Loaded {len(trade_data_df)} trades from {data_file}")
 
-        # 2. Initialize the MarketMakingStrategy
+        # 2. Initialize the GridTradingStrategy
         # The initial quote_size here is just a placeholder, run_backtest will set it.
-        strategy_instance = MarketMakingStrategy(quote_size=0.01)
+        strategy_instance = GridTradingStrategy(quote_size=0.01)
 
         # 3. Initialize the Backtester
         backtester_instance = Backtester(data=trade_data_df, strategy=strategy_instance)

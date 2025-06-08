@@ -6,7 +6,7 @@ import pandas as pd
 
 from src.backtester import Backtester
 from src.data_loader import load_trade_data
-from src.strategy import MarketMakingStrategy
+from src.grid_strategy import GridTradingStrategy
 from src.utils import permute_trade_data
 
 
@@ -52,7 +52,7 @@ def main():
         print(f"\nRunning backtest for spread_bps: {current_spread_bps:.2f}...")
 
         # Re-initialize strategy and backtester for each run to ensure no state leakage
-        strategy = MarketMakingStrategy(quote_size=args.order_size)
+        strategy = GridTradingStrategy(quote_size=args.order_size)
         backtester = Backtester(data=trade_df.copy(), strategy=strategy) # Use a copy of df if it's modified by backtester (it shouldn't be)
 
         backtester.run_backtest(spread_bps=current_spread_bps, order_size=args.order_size)
